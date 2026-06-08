@@ -66,8 +66,11 @@
     function sortProducts(list) {
       const today = TODAY();
       const pinned = list.filter(p => p.scheduled_date === today);
-      const rest   = list.filter(p => p.scheduled_date !== today);
-      return [...pinned, ...rest];
+      const future = list.filter(p => p.scheduled_date && p.scheduled_date > today)
+                        .sort((a,b) => a.scheduled_date.localeCompare(b.scheduled_date));
+      const noDate = list.filter(p => !p.scheduled_date);
+      const past   = list.filter(p => p.scheduled_date && p.scheduled_date < today);
+      return [...pinned, ...future, ...noDate, ...past];
     }
 
     function parseTiktokLong(url) {
