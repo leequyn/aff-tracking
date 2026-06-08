@@ -60,6 +60,16 @@
     // ── Helpers ───────────────────────────────────────────────────────────────────
     const getStatus = id => STATUSES.find(s => s.id === id) || STATUSES[0];
     const nextStatus = id => { const i = STATUSES.findIndex(s => s.id === id); return STATUSES[(i+1)%STATUSES.length].id; };
+    const TODAY = () => new Date().toISOString().slice(0,10);
+    const fmtDate = d => { if (!d) return ''; const [y,m,dd]=d.split('-'); return `${dd}/${m}`; };
+
+    function sortProducts(list) {
+      const today = TODAY();
+      const pinned  = list.filter(p => p.scheduled_date === today);
+      const normal  = list.filter(p => !p.scheduled_date || p.scheduled_date > today);
+      const overdue = list.filter(p => p.scheduled_date && p.scheduled_date < today);
+      return [...pinned, ...normal, ...overdue];
+    }
 
     function parseTiktokLong(url) {
       try {
@@ -158,6 +168,11 @@
     // ── ProductCard ───────────────────────────────────────────────────────────────
     function ProductCard({ product: p, onUpdate, onDelete, onEdit }) {
       const st = getStatus(p.status);
+      const dateRef = useRef();
+      const today = TODAY();
+      const isToday   = p.scheduled_date === today;
+      const isOverdue = p.scheduled_date && p.scheduled_date < today;
+      const isPostToday = p.post_today || isToday;
 
       async function cycleStatus() {
         const ns = nextStatus(p.status);
@@ -174,27 +189,51 @@
         await sb.from('products').update({video_count:v}).eq('id',p.id);
         onUpdate({...p, video_count:v});
       }
+      async function setDate(val) {
+        const d = val || null;
+        await sb.from('products').update({scheduled_date: d}).eq('id',p.id);
+        onUpdate({...p, scheduled_date: d});
+      }
 
       return (
         <div className="rounded-2xl overflow-hidden card-shadow"
           style={{
             background: 'var(--card)',
-            border: p.post_today ? '2px solid var(--accent)' : '2px solid transparent',
+            border: isPostToday ? '2px solid var(--accent)' : isOverdue ? '2px solid #FCA5A5' : '2px solid transparent',
             transition: 'border-color 0.2s',
           }}>
-          <div className="flex gap-3 p-3.5">
-            {/* Image */}
-            <div className="flex-shrink-0 w-[72px] h-[72px] rounded-xl overflow-hidden flex items-center justify-center"
-              style={{background:'var(--p-light)'}}>
-              {p.image_data
-                ? <img src={p.image_data} alt="" className="w-full h-full object-cover" />
-                : <span className="text-3xl">🛍</span>}
-            </div>
+          <div className="flex gap-3 p-3.5 pb-2">
+            {/* Image — click to open link */}
+            {p.link
+              ? <a href={p.link} target="_blank" rel="noopener noreferrer"
+                  className="flex-shrink-0 w-[72px] h-[72px] rounded-xl overflow-hidden flex items-center justify-center"
+                  style={{background:'var(--p-light)'}}>
+                  {p.image_data
+                    ? <img src={p.image_data} alt="" className="w-full h-full object-cover" />
+                    : <span className="text-3xl">🛍</span>}
+                </a>
+              : <div className="flex-shrink-0 w-[72px] h-[72px] rounded-xl overflow-hidden flex items-center justify-center"
+                  style={{background:'var(--p-light)'}}>
+                  {p.image_data
+                    ? <img src={p.image_data} alt="" className="w-full h-full object-cover" />
+                    : <span className="text-3xl">🛍</span>}
+                </div>
+            }
 
             {/* Content */}
             <div className="flex-1 min-w-0">
               <div className="flex items-start justify-between gap-1">
-                <p className="font-semibold text-sm leading-snug line-clamp-2" style={{color:'var(--text)'}}>{p.name || <span style={{color:'var(--muted)', fontStyle:'italic'}}>Chưa có tên</span>}</p>
+                {/* Name — click to open link */}
+                {p.link
+                  ? <a href={p.link} target="_blank" rel="noopener noreferrer"
+                      className="font-bold text-sm leading-snug line-clamp-2 flex-1"
+                      style={{color:'var(--primary)', textDecoration:'none'}}>
+                      {p.name || <span style={{fontStyle:'italic', opacity:.6}}>Chưa có tên</span>}
+                    </a>
+                  : <p className="font-semibold text-sm leading-snug line-clamp-2 flex-1" style={{color:'var(--text)'}}>
+                      {p.name || <span style={{color:'var(--muted)', fontStyle:'italic'}}>Chưa có tên</span>}
+                    </p>
+                }
                 <div className="flex gap-0.5 flex-shrink-0 ml-1">
                   <button onClick={onEdit}
                     className="w-7 h-7 rounded-lg flex items-center justify-center text-xs"
@@ -215,13 +254,19 @@
                   {st.label}
                 </button>
               </div>
-
-              {p.note && <p className="text-xs mt-1 truncate" style={{color:'var(--muted)'}}>{p.note}</p>}
             </div>
           </div>
 
+          {/* Note — prominent */}
+          {p.note && (
+            <div className="mx-3.5 mb-2 px-3 py-2 rounded-xl"
+              style={{background:'var(--bg)'}}>
+              <p className="text-sm font-medium" style={{color:'var(--text)'}}>{p.note}</p>
+            </div>
+          )}
+
           {/* Footer bar */}
-          <div className="flex items-center gap-2 px-3.5 pb-3 pt-0">
+          <div className="flex items-center gap-2 px-3.5 pb-3 pt-0 flex-wrap">
             {/* Video counter */}
             <div className="flex items-center gap-1.5 rounded-xl px-2 py-1.5" style={{background:'var(--bg)'}}>
               <button onClick={()=>changeVideoCount(-1)}
@@ -234,15 +279,31 @@
               <span className="text-xs ml-0.5 font-medium" style={{color:'var(--muted)'}}>video</span>
             </div>
 
+            {/* Scheduled date picker */}
+            <div className="relative">
+              <button onClick={()=>dateRef.current.showPicker?.() || dateRef.current.click()}
+                className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-bold"
+                style={{
+                  background: isToday ? '#FFF7ED' : isOverdue ? '#FFF0F0' : 'var(--bg)',
+                  color:      isToday ? '#C2410C' : isOverdue ? '#EF4444' : 'var(--muted)',
+                  border: `1.5px solid ${isToday ? '#FED7AA' : isOverdue ? '#FCA5A5' : 'var(--border)'}`,
+                }}>
+                <span>{isOverdue ? '⚠' : '📅'}</span>
+                {p.scheduled_date ? fmtDate(p.scheduled_date) : 'Ngày đăng'}
+              </button>
+              <input ref={dateRef} type="date" value={p.scheduled_date||''} onChange={e=>setDate(e.target.value)}
+                className="absolute opacity-0 w-0 h-0 top-0 left-0 pointer-events-none" tabIndex="-1" />
+            </div>
+
             {/* Post today */}
             <button onClick={togglePostToday}
               className="ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold"
               style={{
-                background: p.post_today ? 'var(--accent)' : 'var(--bg)',
-                color: p.post_today ? '#fff' : 'var(--muted)',
+                background: isPostToday ? 'var(--accent)' : 'var(--bg)',
+                color: isPostToday ? '#fff' : 'var(--muted)',
                 transition: 'all 0.2s',
               }}>
-              <span>{p.post_today ? '📌' : '○'}</span>
+              <span>{isPostToday ? '📌' : '○'}</span>
               Đăng hôm nay
             </button>
           </div>
@@ -254,13 +315,14 @@
     function ProductModal({ product, channels, onSave, onClose }) {
       const editing = !!product?.id;
       const [form, setForm] = useState({
-        name:        product?.name||'',
-        link:        product?.link||'',
-        image_data:  product?.image_data||'',
-        channel:     product?.channel||(channels[0]||''),
-        new_channel: '',
-        status:      product?.status||'chua_ro',
-        note:        product?.note||'',
+        name:           product?.name||'',
+        link:           product?.link||'',
+        image_data:     product?.image_data||'',
+        channel:        product?.channel||(channels[0]||''),
+        new_channel:    '',
+        status:         product?.status||'chua_ro',
+        note:           product?.note||'',
+        scheduled_date: product?.scheduled_date||'',
       });
       const [extracting, setExtracting] = useState(false);
       const [saving,     setSaving]     = useState(false);
@@ -320,12 +382,13 @@
         if (!ch) return alert('Chọn hoặc nhập kênh');
         setSaving(true);
         const payload = {
-          name:       form.name.trim(),
-          link:       form.link.trim(),
-          image_data: form.image_data,
-          channel:    ch,
-          status:     form.status,
-          note:       form.note.trim(),
+          name:           form.name.trim(),
+          link:           form.link.trim(),
+          image_data:     form.image_data,
+          channel:        ch,
+          status:         form.status,
+          note:           form.note.trim(),
+          scheduled_date: form.scheduled_date || null,
         };
         try {
           if (editing) {
@@ -500,6 +563,22 @@
                   style={{background:'var(--bg)', color:'var(--text)', border:'1.5px solid var(--border)'}} />
               </div>
 
+              {/* Scheduled date */}
+              <div>
+                <label className="text-xs font-bold mb-1.5 block tracking-wide uppercase" style={{color:'var(--muted)'}}>Ngày đăng dự kiến</label>
+                <div className="flex gap-2 items-center">
+                  <input type="date" value={form.scheduled_date} onChange={e=>set('scheduled_date',e.target.value)}
+                    className="flex-1 px-4 py-3 rounded-2xl text-sm outline-none"
+                    style={{background:'var(--bg)', color: form.scheduled_date ? 'var(--text)' : 'var(--muted)', border:'1.5px solid var(--border)'}} />
+                  {form.scheduled_date && (
+                    <button onClick={()=>set('scheduled_date','')}
+                      className="px-3 py-3 rounded-2xl text-sm font-bold"
+                      style={{background:'#FFF0F0', color:'#EF4444'}}>Xoá</button>
+                  )}
+                </div>
+                <p className="text-xs mt-1" style={{color:'var(--muted)'}}>Tới ngày đó → tự nổi lên đầu danh sách</p>
+              </div>
+
               {/* Buttons */}
               <div className="flex gap-2 pt-1">
                 <button onClick={onClose}
@@ -519,12 +598,13 @@
 
     // ── Root ──────────────────────────────────────────────────────────────────────
     function Root() {
-      const [session,     setSession]     = useState(null);
-      const [appLoading,  setAppLoading]  = useState(true);
-      const [products,    setProducts]    = useState([]);
+      const [session,       setSession]       = useState(null);
+      const [appLoading,    setAppLoading]    = useState(true);
+      const [products,      setProducts]      = useState([]);
       const [activeChannel, setActiveChannel] = useState('all');
-      const [showModal,   setShowModal]   = useState(false);
-      const [editProduct, setEditProduct] = useState(null);
+      const [activeStatus,  setActiveStatus]  = useState('all');
+      const [showModal,     setShowModal]     = useState(false);
+      const [editProduct,   setEditProduct]   = useState(null);
 
       useEffect(() => {
         sb.auth.getSession().then(({ data: { session } }) => {
@@ -567,9 +647,19 @@
         setProducts(prev => prev.filter(x => x.id !== id));
       }
 
-      const channels       = [...new Set(products.map(p => p.channel))].filter(Boolean).sort();
-      const filtered       = activeChannel === 'all' ? products : products.filter(p => p.channel === activeChannel);
-      const postTodayCount = filtered.filter(p => p.post_today).length;
+      const channels = [...new Set(products.map(p => p.channel))].filter(Boolean).sort();
+      const today    = TODAY();
+      const filtered = sortProducts(
+        products
+          .filter(p => activeChannel === 'all' || p.channel === activeChannel)
+          .filter(p => {
+            if (activeStatus === 'post_today') return p.post_today || p.scheduled_date === today;
+            if (activeStatus === 'overdue')    return p.scheduled_date && p.scheduled_date < today;
+            if (activeStatus === 'all')        return true;
+            return p.status === activeStatus;
+          })
+      );
+      const postTodayCount = products.filter(p => p.post_today || p.scheduled_date === today).length;
 
       if (appLoading) return (
         <div className="min-h-screen flex items-center justify-center" style={{background:'var(--bg)'}}>
@@ -582,43 +672,58 @@
 
       if (!session) return <LoginPage />;
 
+      const statusFilters = [
+        { id:'all',        label:'Tất cả' },
+        { id:'post_today', label:'📌 Hôm nay' },
+        { id:'overdue',    label:'⚠ Quá hạn' },
+        ...STATUSES.map(s=>({id:s.id, label:s.label, dot:s.dot, bg:s.bg, fg:s.fg, ring:s.ring})),
+      ];
+
       return (
-        <div className="min-h-screen pb-28" style={{background:'var(--bg)'}}>
+        <div className="min-h-screen pb-8" style={{background:'var(--bg)'}}>
 
           {/* Header */}
-          <div className="sticky top-0 z-10 px-4 pt-5 pb-0" style={{background:'var(--bg)'}}>
-            <div className="flex items-center justify-between mb-4">
+          <div className="sticky top-0 z-10 px-4 pt-4 pb-0" style={{background:'var(--bg)'}}>
+            <div className="flex items-center justify-between mb-3">
               <div>
                 <h1 className="font-display text-2xl font-bold" style={{color:'var(--text)'}}>
                   AFF <span style={{color:'var(--primary)'}}>Tracking</span>
                 </h1>
                 <p className="text-xs font-medium" style={{color:'var(--muted)'}}>Sản phẩm affiliate</p>
               </div>
-              <button onClick={()=>sb.auth.signOut()}
-                className="text-xs px-3.5 py-2 rounded-xl font-semibold"
-                style={{background:'var(--card)', color:'var(--muted)', border:'1px solid var(--border)'}}>
-                Đăng xuất
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={()=>{ setEditProduct(null); setShowModal(true); }}
+                  className="flex items-center gap-1.5 px-4 py-2.5 rounded-2xl text-white font-bold text-sm fab-shadow"
+                  style={{background:'linear-gradient(135deg, var(--primary) 0%, #7C3AED 100%)'}}>
+                  <span className="text-lg leading-none">+</span> Thêm SP
+                </button>
+                <button onClick={()=>sb.auth.signOut()}
+                  className="text-xs px-3 py-2.5 rounded-xl font-semibold"
+                  style={{background:'var(--card)', color:'var(--muted)', border:'1px solid var(--border)'}}>
+                  Thoát
+                </button>
+              </div>
             </div>
 
             {/* Stats */}
-            <div className="flex gap-3 mb-4">
-              <div className="flex-1 rounded-2xl px-4 py-3 card-shadow" style={{background:'var(--card)'}}>
-                <p className="text-xs font-semibold mb-0.5" style={{color:'var(--muted)'}}>Sản phẩm</p>
-                <p className="text-3xl font-bold font-display" style={{color:'var(--primary)'}}>{filtered.length}</p>
+            <div className="flex gap-2 mb-3">
+              <div className="flex-1 rounded-2xl px-3 py-2.5 card-shadow" style={{background:'var(--card)'}}>
+                <p className="text-xs font-semibold" style={{color:'var(--muted)'}}>Sản phẩm</p>
+                <p className="text-2xl font-bold font-display" style={{color:'var(--primary)'}}>{filtered.length}</p>
               </div>
-              <div className="flex-1 rounded-2xl px-4 py-3"
+              <div className="flex-1 rounded-2xl px-3 py-2.5"
                 style={{background:'linear-gradient(135deg, var(--primary) 0%, #7C3AED 100%)'}}>
-                <p className="text-xs font-semibold mb-0.5 text-white" style={{opacity:.8}}>Đăng hôm nay</p>
-                <p className="text-3xl font-bold font-display text-white">{postTodayCount}</p>
+                <p className="text-xs font-semibold text-white" style={{opacity:.8}}>Đăng hôm nay</p>
+                <p className="text-2xl font-bold font-display text-white">{postTodayCount}</p>
               </div>
             </div>
 
             {/* Channel filter */}
-            <div className="flex gap-2 overflow-x-auto no-scrollbar pb-3 -mx-1 px-1">
+            <div className="flex gap-2 overflow-x-auto no-scrollbar pb-2 -mx-1 px-1">
               {[{id:'all',label:'Tất cả'}, ...channels.map(c=>({id:c,label:c}))].map(ch=>(
                 <button key={ch.id} onClick={()=>setActiveChannel(ch.id)}
-                  className="flex-shrink-0 px-4 py-2 rounded-full text-sm font-bold"
+                  className="flex-shrink-0 px-3.5 py-1.5 rounded-full text-xs font-bold"
                   style={{
                     background: activeChannel===ch.id ? 'var(--primary)' : 'var(--card)',
                     color:      activeChannel===ch.id ? '#fff' : 'var(--muted)',
@@ -629,6 +734,26 @@
                 </button>
               ))}
             </div>
+
+            {/* Status filter */}
+            <div className="flex gap-2 overflow-x-auto no-scrollbar pb-3 -mx-1 px-1">
+              {statusFilters.map(sf=>{
+                const active = activeStatus === sf.id;
+                return (
+                  <button key={sf.id} onClick={()=>setActiveStatus(sf.id)}
+                    className="flex-shrink-0 px-3.5 py-1.5 rounded-full text-xs font-bold flex items-center gap-1"
+                    style={{
+                      background: active ? (sf.bg || 'var(--primary)') : 'var(--card)',
+                      color:      active ? (sf.fg || '#fff')            : 'var(--muted)',
+                      border:     `1.5px solid ${active ? (sf.ring || 'var(--primary)') : 'var(--border)'}`,
+                      transition: 'all 0.2s',
+                    }}>
+                    {sf.dot && <span className="w-1.5 h-1.5 rounded-full" style={{background: active ? sf.dot : '#C4B8F5'}} />}
+                    {sf.label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           {/* Product list */}
@@ -636,8 +761,8 @@
             {filtered.length === 0 ? (
               <div className="text-center py-20">
                 <div className="text-6xl mb-4">✦</div>
-                <p className="font-semibold mb-1" style={{color:'var(--text)'}}>Chưa có sản phẩm nào</p>
-                <p className="text-sm" style={{color:'var(--muted)'}}>Bấm + để thêm sản phẩm đầu tiên</p>
+                <p className="font-semibold mb-1" style={{color:'var(--text)'}}>Không có sản phẩm nào</p>
+                <p className="text-sm" style={{color:'var(--muted)'}}>Thử đổi bộ lọc hoặc thêm sản phẩm mới</p>
               </div>
             ) : filtered.map(p=>(
               <ProductCard key={p.id} product={p}
@@ -646,15 +771,6 @@
                 onEdit={()=>{ setEditProduct(p); setShowModal(true); }} />
             ))}
           </div>
-
-          {/* FAB */}
-          <button
-            onClick={()=>{ setEditProduct(null); setShowModal(true); }}
-            className="fixed bottom-6 right-5 flex items-center gap-2 px-5 py-4 rounded-2xl text-white font-bold text-sm z-20 fab-shadow"
-            style={{background:'linear-gradient(135deg, var(--primary) 0%, #7C3AED 100%)'}}>
-            <span className="text-xl leading-none">+</span>
-            Thêm SP
-          </button>
 
           {/* Modal */}
           {showModal && (
