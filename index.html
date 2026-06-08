@@ -267,6 +267,24 @@
       const fileRef = useRef();
       const set = (k,v) => setForm(f=>({...f,[k]:v}));
 
+      // Paste ảnh từ clipboard (Cmd+V bất kỳ đâu trong modal)
+      useEffect(() => {
+        async function onClipboardPaste(e) {
+          const items = e.clipboardData?.items;
+          if (!items) return;
+          for (const item of Array.from(items)) {
+            if (item.type.startsWith('image/')) {
+              e.preventDefault();
+              const file = item.getAsFile();
+              if (file) { const data = await compressImage(file); set('image_data', data); }
+              return;
+            }
+          }
+        }
+        document.addEventListener('paste', onClipboardPaste);
+        return () => document.removeEventListener('paste', onClipboardPaste);
+      }, []);
+
       async function extractUrl(urlOverride) {
         const url = urlOverride || form.link;
         if (!url) return;
@@ -377,24 +395,51 @@
               {/* Image */}
               <div>
                 <label className="text-xs font-bold mb-1.5 block tracking-wide uppercase" style={{color:'var(--muted)'}}>Ảnh sản phẩm</label>
-                <div className="flex gap-3 items-center">
-                  <div className="w-16 h-16 rounded-2xl overflow-hidden flex items-center justify-center flex-shrink-0"
-                    style={{background:'var(--p-light)'}}>
+                <div className="flex gap-3 items-start">
+                  {/* Preview — click để paste */}
+                  <div className="w-16 h-16 rounded-2xl overflow-hidden flex items-center justify-center flex-shrink-0 cursor-pointer relative group"
+                    style={{background:'var(--p-light)'}}
+                    title="Click rồi Cmd+V để dán ảnh">
                     {form.image_data
                       ? <img src={form.image_data} alt="" className="w-full h-full object-cover" />
                       : <span className="text-2xl">🛍</span>}
                   </div>
-                  <div className="flex gap-2">
-                    <button onClick={()=>fileRef.current.click()}
-                      className="px-4 py-2.5 rounded-xl text-sm font-bold"
-                      style={{background:'var(--p-light)', color:'var(--primary)'}}>
-                      📷 Chọn ảnh
-                    </button>
-                    {form.image_data && (
-                      <button onClick={()=>set('image_data','')}
-                        className="px-3 py-2.5 rounded-xl text-sm font-bold"
-                        style={{background:'#FFF0F0', color:'#EF4444'}}>Xoá</button>
-                    )}
+                  <div className="flex flex-col gap-2 flex-1">
+                    <div className="flex gap-2 flex-wrap">
+                      <button onClick={()=>fileRef.current.click()}
+                        className="px-3.5 py-2.5 rounded-xl text-sm font-bold"
+                        style={{background:'var(--p-light)', color:'var(--primary)'}}>
+                        📷 Tải lên
+                      </button>
+                      <button
+                        onClick={async () => {
+                          try {
+                            const [item] = await navigator.clipboard.read().catch(() => []);
+                            if (!item) return alert('Không có ảnh trong clipboard. Hãy copy ảnh trước rồi thử lại.');
+                            for (const type of item.types) {
+                              if (type.startsWith('image/')) {
+                                const blob = await item.getType(type);
+                                const data = await compressImage(new File([blob], 'img.jpg', {type}));
+                                set('image_data', data);
+                                return;
+                              }
+                            }
+                            alert('Clipboard không có ảnh. Hãy copy ảnh trước.');
+                          } catch(_) {
+                            alert('Dùng Cmd+V bất kỳ đâu trong popup này để dán ảnh.');
+                          }
+                        }}
+                        className="px-3.5 py-2.5 rounded-xl text-sm font-bold"
+                        style={{background:'var(--bg)', color:'var(--muted)', border:'1.5px dashed var(--border)'}}>
+                        📋 Dán ảnh
+                      </button>
+                      {form.image_data && (
+                        <button onClick={()=>set('image_data','')}
+                          className="px-3 py-2.5 rounded-xl text-sm font-bold"
+                          style={{background:'#FFF0F0', color:'#EF4444'}}>Xoá</button>
+                      )}
+                    </div>
+                    <p className="text-xs" style={{color:'var(--muted)'}}>Copy ảnh bất kỳ → Cmd+V trong popup này là xong</p>
                   </div>
                 </div>
                 <input ref={fileRef} type="file" accept="image/*" onChange={onFile} className="hidden" />
