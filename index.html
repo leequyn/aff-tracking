@@ -65,10 +65,9 @@
 
     function sortProducts(list) {
       const today = TODAY();
-      const pinned  = list.filter(p => p.scheduled_date === today);
-      const normal  = list.filter(p => !p.scheduled_date || p.scheduled_date > today);
-      const overdue = list.filter(p => p.scheduled_date && p.scheduled_date < today);
-      return [...pinned, ...normal, ...overdue];
+      const pinned = list.filter(p => p.scheduled_date === today);
+      const rest   = list.filter(p => p.scheduled_date !== today);
+      return [...pinned, ...rest];
     }
 
     function parseTiktokLong(url) {
@@ -170,8 +169,7 @@
       const st = getStatus(p.status);
       const dateRef = useRef();
       const today = TODAY();
-      const isToday   = p.scheduled_date === today;
-      const isOverdue = p.scheduled_date && p.scheduled_date < today;
+      const isToday     = p.scheduled_date === today;
       const isPostToday = p.post_today || isToday;
 
       async function cycleStatus() {
@@ -199,7 +197,7 @@
         <div className="rounded-2xl overflow-hidden card-shadow"
           style={{
             background: 'var(--card)',
-            border: isPostToday ? '2px solid var(--accent)' : isOverdue ? '2px solid #FCA5A5' : '2px solid transparent',
+            border: isPostToday ? '2px solid var(--accent)' : '2px solid transparent',
             transition: 'border-color 0.2s',
           }}>
           <div className="flex gap-3 p-3.5 pb-2">
@@ -284,11 +282,11 @@
               <button onClick={()=>dateRef.current.showPicker?.() || dateRef.current.click()}
                 className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-bold"
                 style={{
-                  background: isToday ? '#FFF7ED' : isOverdue ? '#FFF0F0' : 'var(--bg)',
-                  color:      isToday ? '#C2410C' : isOverdue ? '#EF4444' : 'var(--muted)',
-                  border: `1.5px solid ${isToday ? '#FED7AA' : isOverdue ? '#FCA5A5' : 'var(--border)'}`,
+                  background: isToday ? '#FFF7ED' : 'var(--bg)',
+                  color:      isToday ? '#C2410C' : 'var(--muted)',
+                  border: `1.5px solid ${isToday ? '#FED7AA' : 'var(--border)'}`,
                 }}>
-                <span>{isOverdue ? '⚠' : '📅'}</span>
+                <span>📅</span>
                 {p.scheduled_date ? fmtDate(p.scheduled_date) : 'Ngày đăng'}
               </button>
               <input ref={dateRef} type="date" value={p.scheduled_date||''} onChange={e=>setDate(e.target.value)}
@@ -654,7 +652,6 @@
           .filter(p => activeChannel === 'all' || p.channel === activeChannel)
           .filter(p => {
             if (activeStatus === 'post_today') return p.post_today || p.scheduled_date === today;
-            if (activeStatus === 'overdue')    return p.scheduled_date && p.scheduled_date < today;
             if (activeStatus === 'all')        return true;
             return p.status === activeStatus;
           })
@@ -675,7 +672,6 @@
       const statusFilters = [
         { id:'all',        label:'Tất cả' },
         { id:'post_today', label:'📌 Hôm nay' },
-        { id:'overdue',    label:'⚠ Quá hạn' },
         ...STATUSES.map(s=>({id:s.id, label:s.label, dot:s.dot, bg:s.bg, fg:s.fg, ring:s.ring})),
       ];
 
