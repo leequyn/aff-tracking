@@ -255,7 +255,7 @@
       const editing = !!product?.id;
       const [form, setForm] = useState({
         name:        product?.name||'',
-        tiktok_url:  product?.tiktok_url||'',
+        link:        product?.link||'',
         image_data:  product?.image_data||'',
         channel:     product?.channel||(channels[0]||''),
         new_channel: '',
@@ -268,10 +268,10 @@
       const set = (k,v) => setForm(f=>({...f,[k]:v}));
 
       async function extractUrl() {
-        if (!form.tiktok_url) return;
+        if (!form.link) return;
         setExtracting(true);
-        let r = parseTiktokLong(form.tiktok_url);
-        if (!r) r = await fetchTiktokShort(form.tiktok_url);
+        let r = parseTiktokLong(form.link);
+        if (!r) r = await fetchTiktokShort(form.link);
         if (r) {
           if (r.name)  set('name', r.name);
           if (r.image) set('image_data', r.image);
@@ -293,12 +293,12 @@
         if (!ch) return alert('Chọn hoặc nhập kênh');
         setSaving(true);
         const payload = {
-          name:        form.name.trim(),
-          tiktok_url:  form.tiktok_url.trim(),
-          image_data:  form.image_data,
-          channel:     ch,
-          status:      form.status,
-          note:        form.note.trim(),
+          name:       form.name.trim(),
+          link:       form.link.trim(),
+          image_data: form.image_data,
+          channel:    ch,
+          status:     form.status,
+          note:       form.note.trim(),
         };
         if (editing) {
           const { data } = await sb.from('products').update(payload).eq('id',product.id).select().single();
@@ -334,13 +334,13 @@
               <div>
                 <label className="text-xs font-bold mb-1.5 block tracking-wide uppercase" style={{color:'var(--muted)'}}>Link TikTok</label>
                 <div className="flex gap-2">
-                  <input value={form.tiktok_url} onChange={e=>set('tiktok_url',e.target.value)}
+                  <input value={form.link} onChange={e=>set('link',e.target.value)}
                     placeholder="Dán link vt.tiktok.com..."
                     className="flex-1 px-4 py-3 rounded-2xl text-sm outline-none"
                     style={{background:'var(--bg)', color:'var(--text)', border:'1.5px solid var(--border)'}} />
-                  <button onClick={extractUrl} disabled={extracting||!form.tiktok_url}
+                  <button onClick={extractUrl} disabled={extracting||!form.link}
                     className="px-4 py-3 rounded-2xl text-sm font-bold flex-shrink-0"
-                    style={{background: form.tiktok_url ? 'var(--primary)' : 'var(--bg)', color: form.tiktok_url ? '#fff' : 'var(--muted)', transition:'all 0.2s'}}>
+                    style={{background: form.link ? 'var(--primary)' : 'var(--bg)', color: form.link ? '#fff' : 'var(--muted)', transition:'all 0.2s'}}>
                     {extracting ? '⏳' : '🔍'}
                   </button>
                 </div>
