@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AFF Tracking</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:wght@400;600&family=Be+Vietnam+Pro:wght@400;500;600&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    body { background: #f4efe6; font-family: 'Be Vietnam Pro', sans-serif; margin: 0; }
+    .font-display { font-family: 'Fraunces', serif; }
+    ::-webkit-scrollbar { width: 4px; height: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #c0b8ae; border-radius: 2px; }
+    .no-scrollbar::-webkit-scrollbar { display: none; }
+    .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    .line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+
+    // ── Supabase ──────────────────────────────────────────────────────────────────
+    const SB_URL = 'https://ntvweheherqwdsbhhqhw.supabase.co';
+    const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im50dndlaGVoZXJxd2RzYmhocWh3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA0OTYxNjcsImV4cCI6MjA5NjA3MjE2N30.JQY1XIMpU-tOwY6Sg9zjtvG-wyE8FqNKB9Kpq-ncs_s';
+    const sb = supabase.createClient(SB_URL, SB_KEY);
+    const EDGE_FN = `${SB_URL}/functions/v1/tiktok-extract`;
+
+    // ── Constants ─────────────────────────────────────────────────────────────────
+    const STATUSES = [
+      { id: 'chua_ro',    label: 'Chưa rõ',    bg: '#f0ece4', fg: '#7a7264', dot: '#a09890', ring: '#c0b8ae' },
+      { id: 'tiem_nang',  label: 'Tiềm năng',  bg: '#fef3c7', fg: '#92400e', dot: '#f59e0b', ring: '#fbbf24' },
+      { id: 'da_ra_don',  label: 'Đã ra đơn',  bg: '#dcfce7', fg: '#166534', dot: '#22c55e', ring: '#4ade80' },
+      { id: 'ra_don_tot', label: 'Ra đơn tốt', bg: '#fce7f3', fg: '#9d174d', dot: '#ec4899', ring: '#f472b6' },
+    ];
+
+    // ── Helpers ───────────────────────────────────────────────────────────────────
+    const getStatus = id => STATUSES.find(s => s.id === id) || STATUSES[0];
+    const nextStatus = id => { const i = STATUSES.findIndex(s => s.id === id); return STATUSES[(i+1)%STATUSES.length].id; };
+
+    function parseTiktokLong(url) {
+      try {
+        const og = new URL(url).searchParams.get('og_info');
+        if (og) { const d = JSON.parse(og); return { name: (d.title||'').trim(), image: (d.image||'').trim() }; }
+      } catch(_) {}
+      return null;
+    }
+
+    async function fetchTiktokShort(url) {
+      try {
+        const res = await fetch(EDGE_FN, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${SB_KEY}` },
+          body: JSON.stringify({ url }),
+        });
+        if (!res.ok) return null;
+        const d = await res.json();
+        return { name: d.title||'', image: d.imageBase64 ? `data:image/jpeg;base64,${d.imageBase64}` : d.image||'' };
+      } catch(_) { return null; }
+    }
+
+    function compressImage(file) {
+      return new Promise(resolve => {
+        const reader = new FileReader();
+        reader.onload = e => {
+          const img = new Image();
+          img.onload = () => {
+            const MAX = 400;
+            let w = img.width, h = img.height;
+            if (w > MAX || h > MAX) { if (w > h) { h = Math.round(h*MAX/w); w=MAX; } else { w=Math.round(w*MAX/h); h=MAX; } }
+            const c = document.createElement('canvas');
+            c.width=w; c.height=h;
+            c.getContext('2d').drawImage(img,0,0,w,h);
+            resolve(c.toDataURL('image/jpeg', 0.82));
+          };
+          img.src = e.target.result;
+        };
+        reader.readAsDataURL(file);
+      });
+    }
+
+    // ── LoginPage ─────────────────────────────────────────────────────────────────
+    function LoginPage() {
+      const [email, setEmail] = useState('');
+      const [pass, setPass] = useState('');
+      const [err, setErr] = useState('');
+      const [loading, setLoading] = useState(false);
+
+      async function login() {
+        if (!email||!pass) return setErr('Nhập đủ email và mật khẩu');
+        setLoading(true); setErr('');
+        const { error } = await sb.auth.signInWithPassword({ email, password: pass });
+        if (error) setErr('Email hoặc mật khẩu không đúng');
+        setLoading(false);
+      }
+
+      return (
+        <div className="min-h-screen flex items-center justify-center p-4" style={{background:'#f4efe6'}}>
+          <div className="w-full max-w-sm">
+            <h1 className="font-display text-3xl font-semibold text-center mb-1" style={{color:'#3a2e28'}}>AFF Tracking</h1>
+            <p className="text-center text-sm mb-8" style={{color:'#7a7264'}}>Quản lý sản phẩm affiliate</p>
+            <div className="bg-white rounded-2xl p-6 shadow-sm">
+              <div className="space-y-3">
+                <input value={email} onChange={e=>setEmail(e.target.value)} placeholder="Email" type="email"
+                  onKeyDown={e=>e.key==='Enter'&&login()}
+                  className="w-full px-4 py-3 rounded-xl border outline-none text-sm"
+                  style={{borderColor:'#ddd4c5',background:'#faf8f5'}} />
+                <input value={pass} onChange={e=>setPass(e.target.value)} placeholder="Mật khẩu" type="password"
+                  onKeyDown={e=>e.key==='Enter'&&login()}
+                  className="w-full px-4 py-3 rounded-xl border outline-none text-sm"
+                  style={{borderColor:'#ddd4c5',background:'#faf8f5'}} />
+                {err && <p className="text-sm text-red-500">{err}</p>}
+                <button onClick={login} disabled={loading}
+                  className="w-full py-3 rounded-xl text-white font-semibold text-sm"
+                  style={{background:'#b1532f',opacity:loading?.7:1}}>
+                  {loading ? 'Đang đăng nhập...' : 'Đăng nhập'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ── ProductCard ───────────────────────────────────────────────────────────────
+    function ProductCard({ product: p, onUpdate, onDelete, onEdit }) {
+      const st = getStatus(p.status);
+
+      async function cycleStatus() {
+        const ns = nextStatus(p.status);
+        await sb.from('products').update({status:ns}).eq('id',p.id);
+        onUpdate({...p, status:ns});
+      }
+      async function togglePostToday() {
+        const v = !p.post_today;
+        await sb.from('products').update({post_today:v}).eq('id',p.id);
+        onUpdate({...p, post_today:v});
+      }
+      async function changeVideoCount(delta) {
+        const v = Math.max(0,(p.video_count||0)+delta);
+        await sb.from('products').update({video_count:v}).eq('id',p.id);
+        onUpdate({...p, video_count:v});
+      }
+
+      return (
+        <div className="bg-white rounded-2xl p-4 flex gap-3"
+          style={{boxShadow:'0 1px 3px rgba(0,0,0,0.06)', border:`2px solid ${p.post_today?'#b1532f':'transparent'}`}}>
+          {/* Image */}
+          <div className="flex-shrink-0 w-16 h-16 rounded-xl overflow-hidden flex items-center justify-center" style={{background:'#f0ece4'}}>
+            {p.image_data
+              ? <img src={p.image_data} alt="" className="w-full h-full object-cover" />
+              : <span className="text-2xl">🛍</span>}
+          </div>
+
+          {/* Content */}
+          <div className="flex-1 min-w-0">
+            <div className="flex items-start justify-between gap-1">
+              <p className="font-semibold text-sm leading-snug line-clamp-2" style={{color:'#3a2e28'}}>{p.name}</p>
+              <div className="flex gap-0.5 flex-shrink-0">
+                <button onClick={onEdit} className="p-1.5 rounded-lg hover:bg-gray-50 text-sm">✏️</button>
+                <button onClick={()=>onDelete(p.id)} className="p-1.5 rounded-lg hover:bg-gray-50 text-sm">🗑</button>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+              <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{background:'#f0ece4',color:'#7a7264'}}>{p.channel}</span>
+              <button onClick={cycleStatus}
+                className="text-xs px-2 py-0.5 rounded-full font-medium flex items-center gap-1"
+                style={{background:st.bg, color:st.fg}}>
+                <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{background:st.dot}} />
+                {st.label}
+              </button>
+            </div>
+
+            {p.note && <p className="text-xs mt-1 truncate" style={{color:'#a09890'}}>{p.note}</p>}
+
+            <div className="flex items-center gap-2 mt-2">
+              <div className="flex items-center gap-1">
+                <button onClick={()=>changeVideoCount(-1)}
+                  className="w-6 h-6 rounded-lg flex items-center justify-center text-sm font-bold"
+                  style={{background:'#f0ece4',color:'#7a7264'}}>−</button>
+                <span className="text-sm font-semibold min-w-[1.5rem] text-center" style={{color:'#3a2e28'}}>{p.video_count||0}</span>
+                <button onClick={()=>changeVideoCount(1)}
+                  className="w-6 h-6 rounded-lg flex items-center justify-center text-sm font-bold"
+                  style={{background:'#f0ece4',color:'#7a7264'}}>+</button>
+                <span className="text-xs ml-0.5" style={{color:'#a09890'}}>video</span>
+              </div>
+              <button onClick={togglePostToday}
+                className="ml-auto text-xs px-3 py-1.5 rounded-lg font-semibold"
+                style={{background:p.post_today?'#b1532f':'#f0ece4', color:p.post_today?'#fff':'#7a7264'}}>
+                📌 Đăng hôm nay
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ── ProductModal ──────────────────────────────────────────────────────────────
+    function ProductModal({ product, channels, onSave, onClose }) {
+      const editing = !!product?.id;
+      const [form, setForm] = useState({
+        name: product?.name||'',
+        tiktok_url: product?.tiktok_url||'',
+        image_data: product?.image_data||'',
+        channel: product?.channel||(channels[0]||''),
+        new_channel: '',
+        status: product?.status||'chua_ro',
+        note: product?.note||'',
+      });
+      const [extracting, setExtracting] = useState(false);
+      const [saving, setSaving] = useState(false);
+      const fileRef = useRef();
+
+      const set = (k,v) => setForm(f=>({...f,[k]:v}));
+
+      async function extractUrl() {
+        if (!form.tiktok_url) return;
+        setExtracting(true);
+        let r = parseTiktokLong(form.tiktok_url);
+        if (!r) r = await fetchTiktokShort(form.tiktok_url);
+        if (r) {
+          if (r.name) set('name', r.name);
+          if (r.image) set('image_data', r.image);
+        } else {
+          alert('Không lấy được thông tin. Thử link dài hoặc nhập tay.');
+        }
+        setExtracting(false);
+      }
+
+      async function onFile(e) {
+        const f = e.target.files[0];
+        if (!f) return;
+        set('image_data', await compressImage(f));
+      }
+
+      async function save() {
+        if (!form.name.trim()) return alert('Nhập tên sản phẩm');
+        const ch = form.new_channel.trim() || form.channel;
+        if (!ch) return alert('Chọn hoặc nhập kênh');
+        setSaving(true);
+        const payload = {
+          name: form.name.trim(),
+          tiktok_url: form.tiktok_url.trim(),
+          image_data: form.image_data,
+          channel: ch,
+          status: form.status,
+          note: form.note.trim(),
+        };
+        if (editing) {
+          const { data } = await sb.from('products').update(payload).eq('id',product.id).select().single();
+          onSave(data);
+        } else {
+          const { data } = await sb.from('products').insert({...payload, video_count:0, post_today:false}).select().single();
+          onSave(data);
+        }
+        setSaving(false);
+      }
+
+      const useNew = form.new_channel.trim().length > 0;
+
+      return (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center"
+          style={{background:'rgba(0,0,0,0.45)'}}
+          onClick={e=>e.target===e.currentTarget&&onClose()}>
+          <div className="w-full sm:max-w-md bg-white rounded-t-3xl sm:rounded-2xl p-6 max-h-[92vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="font-display text-xl font-semibold" style={{color:'#3a2e28'}}>
+                {editing ? 'Sửa sản phẩm' : 'Thêm sản phẩm'}
+              </h2>
+              <button onClick={onClose} className="text-gray-400 text-xl leading-none">✕</button>
+            </div>
+
+            <div className="space-y-4">
+              {/* TikTok URL */}
+              <div>
+                <label className="text-xs font-semibold mb-1.5 block" style={{color:'#7a7264'}}>Link TikTok</label>
+                <div className="flex gap-2">
+                  <input value={form.tiktok_url} onChange={e=>set('tiktok_url',e.target.value)}
+                    placeholder="Dán link TikTok..."
+                    className="flex-1 px-3.5 py-2.5 rounded-xl border outline-none text-sm"
+                    style={{borderColor:'#ddd4c5',background:'#faf8f5'}} />
+                  <button onClick={extractUrl} disabled={extracting||!form.tiktok_url}
+                    className="px-3 py-2.5 rounded-xl text-sm font-semibold flex-shrink-0"
+                    style={{background:'#f0ece4',color:'#b1532f'}}>
+                    {extracting ? '...' : '🔍'}
+                  </button>
+                </div>
+                {extracting && <p className="text-xs mt-1" style={{color:'#b1532f'}}>Đang lấy thông tin...</p>}
+              </div>
+
+              {/* Name */}
+              <div>
+                <label className="text-xs font-semibold mb-1.5 block" style={{color:'#7a7264'}}>Tên sản phẩm *</label>
+                <input value={form.name} onChange={e=>set('name',e.target.value)}
+                  placeholder="Tên sản phẩm"
+                  className="w-full px-3.5 py-2.5 rounded-xl border outline-none text-sm"
+                  style={{borderColor:'#ddd4c5',background:'#faf8f5'}} />
+              </div>
+
+              {/* Image */}
+              <div>
+                <label className="text-xs font-semibold mb-1.5 block" style={{color:'#7a7264'}}>Ảnh sản phẩm</label>
+                <div className="flex gap-3 items-center">
+                  <div className="w-16 h-16 rounded-xl overflow-hidden flex items-center justify-center flex-shrink-0" style={{background:'#f0ece4'}}>
+                    {form.image_data
+                      ? <img src={form.image_data} alt="" className="w-full h-full object-cover" />
+                      : <span className="text-2xl">🛍</span>}
+                  </div>
+                  <button onClick={()=>fileRef.current.click()}
+                    className="px-4 py-2 rounded-xl text-sm font-semibold border"
+                    style={{borderColor:'#ddd4c5',color:'#7a7264'}}>
+                    📷 Chọn ảnh
+                  </button>
+                  {form.image_data && <button onClick={()=>set('image_data','')} className="text-sm text-red-400">Xoá</button>}
+                </div>
+                <input ref={fileRef} type="file" accept="image/*" onChange={onFile} className="hidden" />
+              </div>
+
+              {/* Channel */}
+              <div>
+                <label className="text-xs font-semibold mb-1.5 block" style={{color:'#7a7264'}}>Kênh *</label>
+                {channels.length > 0 && !useNew && (
+                  <div className="flex flex-wrap gap-2 mb-2">
+                    {channels.map(ch=>(
+                      <button key={ch} onClick={()=>set('channel',ch)}
+                        className="px-3 py-1.5 rounded-lg text-sm font-medium border"
+                        style={{
+                          background: form.channel===ch?'#b1532f':'#f0ece4',
+                          color: form.channel===ch?'#fff':'#7a7264',
+                          borderColor: form.channel===ch?'#b1532f':'#ddd4c5',
+                        }}>
+                        {ch}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <input value={form.new_channel} onChange={e=>set('new_channel',e.target.value)}
+                  placeholder={channels.length ? '+ Thêm kênh mới...' : 'Tên kênh (VD: Kênh chính)'}
+                  className="w-full px-3.5 py-2.5 rounded-xl border outline-none text-sm"
+                  style={{borderColor:useNew?'#b1532f':'#ddd4c5',background:'#faf8f5'}} />
+              </div>
+
+              {/* Status */}
+              <div>
+                <label className="text-xs font-semibold mb-1.5 block" style={{color:'#7a7264'}}>Trạng thái</label>
+                <div className="flex flex-wrap gap-2">
+                  {STATUSES.map(st=>(
+                    <button key={st.id} onClick={()=>set('status',st.id)}
+                      className="px-3 py-1.5 rounded-lg text-sm font-medium flex items-center gap-1.5"
+                      style={{
+                        background: form.status===st.id?st.bg:'#f0ece4',
+                        color: form.status===st.id?st.fg:'#7a7264',
+                        border:`1.5px solid ${form.status===st.id?st.ring:'#ddd4c5'}`,
+                      }}>
+                      <span className="w-1.5 h-1.5 rounded-full" style={{background:form.status===st.id?st.dot:'#c0b8ae'}} />
+                      {st.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Note */}
+              <div>
+                <label className="text-xs font-semibold mb-1.5 block" style={{color:'#7a7264'}}>Ghi chú (tuỳ chọn)</label>
+                <input value={form.note} onChange={e=>set('note',e.target.value)}
+                  placeholder="VD: hoa hồng 15%"
+                  className="w-full px-3.5 py-2.5 rounded-xl border outline-none text-sm"
+                  style={{borderColor:'#ddd4c5',background:'#faf8f5'}} />
+              </div>
+
+              {/* Buttons */}
+              <div className="flex gap-2 pt-2">
+                <button onClick={onClose}
+                  className="flex-1 py-3 rounded-xl font-semibold text-sm border"
+                  style={{borderColor:'#ddd4c5',color:'#7a7264'}}>Huỷ</button>
+                <button onClick={save} disabled={saving}
+                  className="flex-1 py-3 rounded-xl font-semibold text-sm text-white"
+                  style={{background:'#b1532f',opacity:saving?.7:1}}>
+                  {saving ? 'Đang lưu...' : (editing?'Cập nhật':'Thêm')}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ── Root ──────────────────────────────────────────────────────────────────────
+    function Root() {
+      const [session, setSession] = useState(null);
+      const [appLoading, setAppLoading] = useState(true);
+      const [products, setProducts] = useState([]);
+      const [activeChannel, setActiveChannel] = useState('all');
+      const [showModal, setShowModal] = useState(false);
+      const [editProduct, setEditProduct] = useState(null);
+
+      useEffect(() => {
+        sb.auth.getSession().then(({ data: { session } }) => {
+          setSession(session); setAppLoading(false);
+        });
+        const { data: { subscription } } = sb.auth.onAuthStateChange((_, s) => setSession(s));
+        return () => subscription.unsubscribe();
+      }, []);
+
+      useEffect(() => {
+        if (!session) return;
+        fetchAll();
+        const ch = sb.channel('products-rt')
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, fetchAll)
+          .subscribe();
+        return () => sb.removeChannel(ch);
+      }, [session]);
+
+      async function fetchAll() {
+        const { data } = await sb.from('products').select('*').order('created_at', { ascending: false });
+        if (data) setProducts(data);
+      }
+
+      function handleSaved(p) {
+        if (!p) return;
+        setProducts(prev => {
+          const exists = prev.find(x => x.id === p.id);
+          return exists ? prev.map(x => x.id === p.id ? p : x) : [p, ...prev];
+        });
+        setShowModal(false); setEditProduct(null);
+      }
+
+      function handleUpdate(p) {
+        setProducts(prev => prev.map(x => x.id === p.id ? p : x));
+      }
+
+      async function handleDelete(id) {
+        if (!confirm('Xoá sản phẩm này?')) return;
+        await sb.from('products').delete().eq('id', id);
+        setProducts(prev => prev.filter(x => x.id !== id));
+      }
+
+      const channels = [...new Set(products.map(p => p.channel))].filter(Boolean).sort();
+      const filtered = activeChannel === 'all' ? products : products.filter(p => p.channel === activeChannel);
+      const postTodayCount = filtered.filter(p => p.post_today).length;
+
+      if (appLoading) return (
+        <div className="min-h-screen flex items-center justify-center" style={{background:'#f4efe6'}}>
+          <div className="text-center">
+            <div className="text-4xl mb-3">🛍</div>
+            <p className="text-sm" style={{color:'#7a7264'}}>Đang tải...</p>
+          </div>
+        </div>
+      );
+
+      if (!session) return <LoginPage />;
+
+      return (
+        <div className="min-h-screen pb-28" style={{background:'#f4efe6'}}>
+          {/* Header */}
+          <div className="sticky top-0 z-10 px-4 pt-5 pb-0" style={{background:'#f4efe6'}}>
+            <div className="flex items-center justify-between mb-3">
+              <h1 className="font-display text-2xl font-semibold" style={{color:'#3a2e28'}}>AFF Tracking</h1>
+              <button onClick={()=>sb.auth.signOut()}
+                className="text-xs px-3 py-1.5 rounded-lg"
+                style={{color:'#7a7264',background:'#e8e0d5'}}>
+                Đăng xuất
+              </button>
+            </div>
+
+            {/* Stats */}
+            <div className="flex gap-3 mb-3">
+              <div className="flex-1 bg-white rounded-xl px-3 py-2.5" style={{boxShadow:'0 1px 3px rgba(0,0,0,0.06)'}}>
+                <p className="text-xs" style={{color:'#7a7264'}}>Tổng sản phẩm</p>
+                <p className="text-2xl font-bold font-display" style={{color:'#3a2e28'}}>{filtered.length}</p>
+              </div>
+              <div className="flex-1 rounded-xl px-3 py-2.5" style={{background:'#b1532f'}}>
+                <p className="text-xs text-white" style={{opacity:.85}}>Đăng hôm nay</p>
+                <p className="text-2xl font-bold font-display text-white">{postTodayCount}</p>
+              </div>
+            </div>
+
+            {/* Channel filter */}
+            <div className="flex gap-2 overflow-x-auto no-scrollbar pb-3 -mx-1 px-1">
+              {[{id:'all',label:'Tất cả'}, ...channels.map(c=>({id:c,label:c}))].map(ch=>(
+                <button key={ch.id} onClick={()=>setActiveChannel(ch.id)}
+                  className="flex-shrink-0 px-3.5 py-1.5 rounded-full text-sm font-medium"
+                  style={{
+                    background: activeChannel===ch.id?'#3a2e28':'#e8e0d5',
+                    color: activeChannel===ch.id?'#fff':'#7a7264',
+                  }}>
+                  {ch.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Product list */}
+          <div className="px-4 space-y-3">
+            {filtered.length === 0 ? (
+              <div className="text-center py-16">
+                <div className="text-5xl mb-3">🛍</div>
+                <p style={{color:'#7a7264'}}>Chưa có sản phẩm nào</p>
+                <p className="text-sm mt-1" style={{color:'#a09890'}}>Bấm + để thêm sản phẩm đầu tiên</p>
+              </div>
+            ) : filtered.map(p=>(
+              <ProductCard key={p.id} product={p}
+                onUpdate={handleUpdate}
+                onDelete={handleDelete}
+                onEdit={()=>{ setEditProduct(p); setShowModal(true); }} />
+            ))}
+          </div>
+
+          {/* FAB */}
+          <button
+            onClick={()=>{ setEditProduct(null); setShowModal(true); }}
+            className="fixed bottom-6 right-6 w-14 h-14 rounded-full text-white text-2xl flex items-center justify-center z-20"
+            style={{background:'#b1532f', boxShadow:'0 4px 16px rgba(177,83,47,0.4)'}}>
+            +
+          </button>
+
+          {/* Modal */}
+          {showModal && (
+            <ProductModal
+              product={editProduct}
+              channels={channels}
+              onSave={handleSaved}
+              onClose={()=>{ setShowModal(false); setEditProduct(null); }} />
+          )}
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<Root />);
+  </script>
+</body>
+</html>
