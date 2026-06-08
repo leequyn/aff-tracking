@@ -721,6 +721,8 @@
         ? channels
         : [...new Set(products.map(p => p.channel))].filter(Boolean).sort();
       const today    = TODAY();
+      const _tom = new Date(); _tom.setDate(_tom.getDate()+1);
+      const TOMORROW = _tom.toISOString().slice(0,10);
       const filtered = sortProducts(
         products
           .filter(p => activeChannel === 'all' || p.channel === activeChannel)
@@ -732,8 +734,6 @@
           })
       );
       const postTodayCount = products.filter(p => p.post_today || p.scheduled_date === today).length;
-      const _tom = new Date(); _tom.setDate(_tom.getDate()+1);
-      const TOMORROW = _tom.toISOString().slice(0,10);
       // alias for readability in JSX
       const chList = displayChannels;
 
