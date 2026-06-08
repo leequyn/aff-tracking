@@ -267,11 +267,12 @@
       const fileRef = useRef();
       const set = (k,v) => setForm(f=>({...f,[k]:v}));
 
-      async function extractUrl() {
-        if (!form.link) return;
+      async function extractUrl(urlOverride) {
+        const url = urlOverride || form.link;
+        if (!url) return;
         setExtracting(true);
-        let r = parseTiktokLong(form.link);
-        if (!r) r = await fetchTiktokShort(form.link);
+        let r = parseTiktokLong(url);
+        if (!r) r = await fetchTiktokShort(url);
         if (r) {
           if (r.name)  set('name', r.name);
           if (r.image) set('image_data', r.image);
@@ -279,6 +280,14 @@
           alert('Không lấy được thông tin. Hãy nhập tay hoặc dùng link share qua Messenger/Zalo.');
         }
         setExtracting(false);
+      }
+
+      function handleLinkPaste(e) {
+        const pasted = (e.clipboardData || window.clipboardData).getData('text').trim();
+        if (!pasted || !pasted.includes('tiktok')) return;
+        e.preventDefault();
+        set('link', pasted);
+        extractUrl(pasted);
       }
 
       async function onFile(e) {
@@ -300,14 +309,20 @@
           status:     form.status,
           note:       form.note.trim(),
         };
-        if (editing) {
-          const { data } = await sb.from('products').update(payload).eq('id',product.id).select().single();
-          onSave(data);
-        } else {
-          const { data } = await sb.from('products').insert({...payload, video_count:0, post_today:false}).select().single();
-          onSave(data);
+        try {
+          if (editing) {
+            const { data, error } = await sb.from('products').update(payload).eq('id',product.id).select().single();
+            if (error) throw error;
+            onSave(data);
+          } else {
+            const { data, error } = await sb.from('products').insert({...payload, video_count:0, post_today:false}).select().single();
+            if (error) throw error;
+            onSave(data);
+          }
+        } catch(err) {
+          alert('Lỗi lưu: ' + (err.message || JSON.stringify(err)));
+          setSaving(false);
         }
-        setSaving(false);
       }
 
       const useNew = form.new_channel.trim().length > 0;
@@ -335,6 +350,7 @@
                 <label className="text-xs font-bold mb-1.5 block tracking-wide uppercase" style={{color:'var(--muted)'}}>Link TikTok</label>
                 <div className="flex gap-2">
                   <input value={form.link} onChange={e=>set('link',e.target.value)}
+                    onPaste={handleLinkPaste}
                     placeholder="Dán link vt.tiktok.com..."
                     className="flex-1 px-4 py-3 rounded-2xl text-sm outline-none"
                     style={{background:'var(--bg)', color:'var(--text)', border:'1.5px solid var(--border)'}} />
