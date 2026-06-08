@@ -657,6 +657,7 @@
           .filter(p => activeChannel === 'all' || p.channel === activeChannel)
           .filter(p => {
             if (activeStatus === 'post_today') return p.post_today || p.scheduled_date === today;
+            if (activeStatus === 'tomorrow')   return p.scheduled_date === TOMORROW;
             if (activeStatus === 'all')        return true;
             return p.status === activeStatus;
           })
@@ -674,9 +675,13 @@
 
       if (!session) return <LoginPage />;
 
+      const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate()+1);
+      const TOMORROW = tomorrow.toISOString().slice(0,10);
+
       const statusFilters = [
         { id:'all',        label:'Tất cả' },
         { id:'post_today', label:'📌 Hôm nay' },
+        { id:'tomorrow',   label:'📅 Ngày mai' },
         ...STATUSES.map(s=>({id:s.id, label:s.label, dot:s.dot, bg:s.bg, fg:s.fg, ring:s.ring})),
       ];
 
