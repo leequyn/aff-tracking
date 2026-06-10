@@ -62,6 +62,8 @@
     const nextStatus = id => { const i = STATUSES.findIndex(s => s.id === id); return STATUSES[(i+1)%STATUSES.length].id; };
     const TODAY = () => new Date().toISOString().slice(0,10);
     const fmtDate = d => { if (!d) return ''; const [y,m,dd]=d.split('-'); return `${dd}/${m}`; };
+    const fmtMonth = m => { if (!m) return ''; const [y,mo]=m.split('-'); return `Tháng ${parseInt(mo)}/${y}`; };
+    const fmtCurrency = n => new Intl.NumberFormat('vi-VN').format(n||0) + 'đ';
 
     function sortProducts(list) {
       const today = TODAY();
@@ -658,6 +660,261 @@
       );
     }
 
+    // ── ExpenseModal ─────────────────────────────────────────────────────────────
+    function ExpenseModal({ selMonth, channels, onSave, onClose }) {
+      const [form, setForm] = useState({
+        date: TODAY(), tool_name: '', amount: '', channel: '', note: ''
+      });
+      const [saving, setSaving] = useState(false);
+      const set = (k,v) => setForm(f=>({...f,[k]:v}));
+
+      async function save() {
+        if (!form.tool_name.trim()) return alert('Nhập tên tool');
+        if (!form.amount || isNaN(Number(form.amount))) return alert('Nhập số tiền hợp lệ');
+        setSaving(true);
+        const payload = {
+          date: form.date || TODAY(),
+          tool_name: form.tool_name.trim(),
+          amount: Number(String(form.amount).replace(/[^0-9]/g,'')),
+          channel: form.channel,
+          note: form.note.trim(),
+        };
+        const { data, error } = await sb.from('expenses').insert(payload).select().single();
+        if (error) { alert('Lỗi: ' + error.message); setSaving(false); return; }
+        onSave(data);
+      }
+
+      return (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center"
+          style={{background:'rgba(30,16,64,0.6)', backdropFilter:'blur(4px)'}}
+          onClick={e=>e.target===e.currentTarget&&onClose()}>
+          <div className="w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl p-6"
+            style={{background:'var(--card)', border:'1px solid var(--border)'}}>
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="font-display text-xl font-bold" style={{color:'var(--text)'}}>+ Chi phí tool</h2>
+              <button onClick={onClose} className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold"
+                style={{background:'var(--bg)', color:'var(--muted)'}}>✕</button>
+            </div>
+            <div className="space-y-3">
+              <div className="flex gap-2">
+                <div className="flex-1">
+                  <label className="text-xs font-bold mb-1 block uppercase tracking-wide" style={{color:'var(--muted)'}}>Ngày</label>
+                  <input type="date" value={form.date} onChange={e=>set('date',e.target.value)}
+                    className="w-full px-3 py-2.5 rounded-xl text-sm outline-none"
+                    style={{background:'var(--bg)', color:'var(--text)', border:'1.5px solid var(--border)'}} />
+                </div>
+                <div className="flex-1">
+                  <label className="text-xs font-bold mb-1 block uppercase tracking-wide" style={{color:'var(--muted)'}}>Kênh</label>
+                  <select value={form.channel} onChange={e=>set('channel',e.target.value)}
+                    className="w-full px-3 py-2.5 rounded-xl text-sm outline-none"
+                    style={{background:'var(--bg)', color:'var(--text)', border:'1.5px solid var(--border)'}}>
+                    <option value="">Chung</option>
+                    {channels.map(c=><option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-bold mb-1 block uppercase tracking-wide" style={{color:'var(--muted)'}}>Tên tool *</label>
+                <input value={form.tool_name} onChange={e=>set('tool_name',e.target.value)}
+                  placeholder="VD: ChatGPT Plus, Runway, Canva Pro..."
+                  className="w-full px-3 py-2.5 rounded-xl text-sm outline-none"
+                  style={{background:'var(--bg)', color:'var(--text)', border:'1.5px solid var(--border)'}} />
+              </div>
+              <div>
+                <label className="text-xs font-bold mb-1 block uppercase tracking-wide" style={{color:'var(--muted)'}}>Số tiền (đ) *</label>
+                <input value={form.amount} onChange={e=>set('amount',e.target.value)}
+                  placeholder="VD: 500000"
+                  inputMode="numeric"
+                  className="w-full px-3 py-2.5 rounded-xl text-sm outline-none"
+                  style={{background:'var(--bg)', color:'var(--text)', border:'1.5px solid var(--border)'}} />
+              </div>
+              <div>
+                <label className="text-xs font-bold mb-1 block uppercase tracking-wide" style={{color:'var(--muted)'}}>Ghi chú</label>
+                <input value={form.note} onChange={e=>set('note',e.target.value)}
+                  placeholder="VD: gói tháng, gia hạn..."
+                  className="w-full px-3 py-2.5 rounded-xl text-sm outline-none"
+                  style={{background:'var(--bg)', color:'var(--text)', border:'1.5px solid var(--border)'}} />
+              </div>
+              <div className="flex gap-2 pt-1">
+                <button onClick={onClose} className="flex-1 py-3 rounded-2xl font-bold text-sm"
+                  style={{background:'var(--bg)', color:'var(--muted)', border:'1.5px solid var(--border)'}}>Huỷ</button>
+                <button onClick={save} disabled={saving} className="flex-1 py-3 rounded-2xl font-bold text-sm text-white"
+                  style={{background: saving ? '#A78BFA' : 'var(--primary)'}}>
+                  {saving ? 'Đang lưu...' : 'Thêm +'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ── ExpensePage ───────────────────────────────────────────────────────────────
+    function ExpensePage({ channels }) {
+      const [selMonth,    setSelMonth]    = useState(()=>TODAY().slice(0,7));
+      const [expenses,    setExpenses]    = useState([]);
+      const [revenues,    setRevenues]    = useState([]);
+      const [revForms,    setRevForms]    = useState({});
+      const [savingRev,   setSavingRev]   = useState({});
+      const [showExpModal,setShowExpModal]= useState(false);
+
+      useEffect(() => { fetchExpenses(); fetchRevenues(); }, [selMonth]);
+
+      async function fetchExpenses() {
+        const y = selMonth.slice(0,4), mo = selMonth.slice(5,7);
+        const last = new Date(Number(y), Number(mo), 0).getDate();
+        const { data } = await sb.from('expenses').select('*')
+          .gte('date', `${selMonth}-01`).lte('date', `${selMonth}-${last}`)
+          .order('date', {ascending:false});
+        if (data) setExpenses(data);
+      }
+
+      async function fetchRevenues() {
+        const { data } = await sb.from('revenues').select('*').eq('month', selMonth).order('channel');
+        if (data) {
+          setRevenues(data);
+          const f = {};
+          data.forEach(r => { f[r.channel] = {revenue:r.revenue, commission:r.commission, actual_received:r.actual_received, note:r.note||''}; });
+          setRevForms(f);
+        }
+      }
+
+      function shiftMonth(delta) {
+        const d = new Date(selMonth + '-01'); d.setMonth(d.getMonth()+delta);
+        setSelMonth(d.toISOString().slice(0,7));
+      }
+
+      async function deleteExp(id) {
+        if (!confirm('Xoá khoản chi này?')) return;
+        await sb.from('expenses').delete().eq('id',id);
+        setExpenses(prev=>prev.filter(e=>e.id!==id));
+      }
+
+      async function saveRevenue(channel) {
+        const f = revForms[channel]||{};
+        setSavingRev(s=>({...s,[channel]:true}));
+        const payload = {month:selMonth, channel, revenue:Number(f.revenue||0), commission:Number(f.commission||0), actual_received:Number(f.actual_received||0), note:f.note||''};
+        const {data,error} = await sb.from('revenues').upsert(payload,{onConflict:'month,channel'}).select().single();
+        if (!error&&data) setRevenues(prev=>{const ex=prev.find(r=>r.channel===channel); return ex?prev.map(r=>r.channel===channel?data:r):[...prev,data];});
+        setSavingRev(s=>({...s,[channel]:false}));
+      }
+
+      function setRevField(channel,key,val) {
+        setRevForms(f=>({...f,[channel]:{...(f[channel]||{}), [key]:val}}));
+      }
+
+      const totalExp   = expenses.reduce((s,e)=>s+(e.amount||0),0);
+      const totalRecv  = revenues.reduce((s,r)=>s+(r.actual_received||0),0);
+      const profit     = totalRecv - totalExp;
+      const revChannels = [...new Set([...channels, 'Tổng'])];
+
+      return (
+        <div>
+          {/* Month navigator */}
+          <div className="flex items-center justify-center gap-4 mb-4">
+            <button onClick={()=>shiftMonth(-1)}
+              className="w-9 h-9 rounded-xl flex items-center justify-center font-bold text-lg"
+              style={{background:'var(--card)', color:'var(--primary)', border:'1.5px solid var(--border)'}}>‹</button>
+            <span className="font-display text-lg font-bold" style={{color:'var(--text)'}}>{fmtMonth(selMonth)}</span>
+            <button onClick={()=>shiftMonth(1)}
+              className="w-9 h-9 rounded-xl flex items-center justify-center font-bold text-lg"
+              style={{background:'var(--card)', color:'var(--primary)', border:'1.5px solid var(--border)'}}>›</button>
+          </div>
+
+          {/* Stats */}
+          <div className="grid gap-3 mb-5" style={{gridTemplateColumns:'1fr 1fr 1fr'}}>
+            <div className="rounded-2xl p-3 card-shadow" style={{background:'var(--card)'}}>
+              <p className="text-xs font-semibold mb-1" style={{color:'var(--muted)'}}>Chi phí tools</p>
+              <p className="text-lg font-bold font-display" style={{color:'var(--primary)'}}>{fmtCurrency(totalExp)}</p>
+            </div>
+            <div className="rounded-2xl p-3 card-shadow" style={{background:'var(--card)'}}>
+              <p className="text-xs font-semibold mb-1" style={{color:'var(--muted)'}}>Thực nhận</p>
+              <p className="text-lg font-bold font-display" style={{color:'#065F46'}}>{fmtCurrency(totalRecv)}</p>
+            </div>
+            <div className="rounded-2xl p-3" style={{background: profit>=0?'#ECFDF5':'#FFF0F0', border:`1.5px solid ${profit>=0?'#6EE7B7':'#FCA5A5'}`}}>
+              <p className="text-xs font-semibold mb-1" style={{color: profit>=0?'#065F46':'#DC2626'}}>Lợi nhuận</p>
+              <p className="text-lg font-bold font-display" style={{color: profit>=0?'#065F46':'#DC2626'}}>{profit>=0?'+':''}{fmtCurrency(profit)}</p>
+            </div>
+          </div>
+
+          {/* Expenses */}
+          <div className="rounded-2xl overflow-hidden card-shadow mb-4" style={{background:'var(--card)'}}>
+            <div className="flex items-center justify-between px-4 py-3" style={{borderBottom:'1px solid var(--border)'}}>
+              <h3 className="font-bold text-sm" style={{color:'var(--text)'}}>Chi phí tools tháng này</h3>
+              <button onClick={()=>setShowExpModal(true)}
+                className="text-xs px-3 py-1.5 rounded-xl font-bold text-white"
+                style={{background:'var(--primary)'}}>+ Thêm</button>
+            </div>
+            {expenses.length === 0 ? (
+              <p className="text-sm text-center py-6" style={{color:'var(--muted)'}}>Chưa có khoản chi nào</p>
+            ) : (
+              expenses.map(e=>(
+                <div key={e.id} className="flex items-center gap-2 px-4 py-2.5" style={{borderBottom:'1px solid var(--border)'}}>
+                  <span className="text-xs font-bold flex-shrink-0" style={{color:'var(--muted)', minWidth:'3rem'}}>{fmtDate(e.date)}</span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold truncate" style={{color:'var(--text)'}}>{e.tool_name}</p>
+                    {(e.channel||e.note) && <p className="text-xs truncate" style={{color:'var(--muted)'}}>{[e.channel,e.note].filter(Boolean).join(' · ')}</p>}
+                  </div>
+                  <span className="text-sm font-bold flex-shrink-0" style={{color:'var(--primary)'}}>{fmtCurrency(e.amount)}</span>
+                  <button onClick={()=>deleteExp(e.id)}
+                    className="w-7 h-7 rounded-lg flex items-center justify-center text-xs flex-shrink-0"
+                    style={{background:'#FFF0F0', color:'#EF4444'}}>🗑</button>
+                </div>
+              ))
+            )}
+            {expenses.length > 0 && (
+              <div className="flex justify-end px-4 py-2.5" style={{background:'var(--bg)'}}>
+                <span className="text-sm font-bold" style={{color:'var(--primary)'}}>Tổng: {fmtCurrency(totalExp)}</span>
+              </div>
+            )}
+          </div>
+
+          {/* Revenue */}
+          <div className="rounded-2xl overflow-hidden card-shadow" style={{background:'var(--card)'}}>
+            <div className="px-4 py-3" style={{borderBottom:'1px solid var(--border)'}}>
+              <h3 className="font-bold text-sm" style={{color:'var(--text)'}}>Doanh thu tháng này</h3>
+              <p className="text-xs mt-0.5" style={{color:'var(--muted)'}}>Nhập xong bấm Lưu từng kênh</p>
+            </div>
+            {revChannels.map(ch=>{
+              const f = revForms[ch]||{};
+              const isSaving = !!savingRev[ch];
+              return (
+                <div key={ch} className="px-4 py-3" style={{borderBottom:'1px solid var(--border)'}}>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-bold px-2 py-0.5 rounded-full"
+                      style={{background:'var(--p-light)', color:'var(--primary)'}}>{ch}</span>
+                    <button onClick={()=>saveRevenue(ch)} disabled={isSaving}
+                      className="text-xs px-3 py-1.5 rounded-xl font-bold"
+                      style={{background: isSaving?'#A78BFA':'var(--primary)', color:'#fff'}}>
+                      {isSaving?'Lưu...':'Lưu ✓'}
+                    </button>
+                  </div>
+                  <div className="grid gap-2" style={{gridTemplateColumns:'1fr 1fr 1fr'}}>
+                    {[['revenue','Doanh thu'],['commission','Hoa hồng'],['actual_received','Thực nhận']].map(([key,label])=>(
+                      <div key={key}>
+                        <p className="text-xs mb-1" style={{color:'var(--muted)'}}>{label}</p>
+                        <input value={f[key]||''} onChange={e=>setRevField(ch,key,e.target.value)}
+                          placeholder="0" inputMode="numeric"
+                          className="w-full px-2.5 py-2 rounded-xl text-sm outline-none font-semibold"
+                          style={{background:'var(--bg)', color:'var(--text)', border:'1.5px solid var(--border)'}} />
+                      </div>
+                    ))}
+                  </div>
+                  {f.actual_received > 0 && <p className="text-xs mt-1.5 font-semibold" style={{color:'#065F46'}}>✓ Thực nhận: {fmtCurrency(Number(f.actual_received))}</p>}
+                </div>
+              );
+            })}
+          </div>
+
+          {showExpModal && (
+            <ExpenseModal selMonth={selMonth} channels={channels}
+              onSave={d=>{setExpenses(p=>[d,...p]); setShowExpModal(false);}}
+              onClose={()=>setShowExpModal(false)} />
+          )}
+        </div>
+      );
+    }
+
     // ── Root ──────────────────────────────────────────────────────────────────────
     function Root() {
       const [session,       setSession]       = useState(null);
@@ -668,6 +925,7 @@
       const [activeStatus,  setActiveStatus]  = useState('all');
       const [showModal,     setShowModal]     = useState(false);
       const [editProduct,   setEditProduct]   = useState(null);
+      const [activePage,    setActivePage]    = useState('products'); // 'products' | 'expenses'
 
       useEffect(() => {
         sb.auth.getSession().then(({ data: { session } }) => {
@@ -768,12 +1026,13 @@
                 <p className="text-xs font-medium" style={{color:'var(--muted)'}}>Sản phẩm affiliate</p>
               </div>
               <div className="flex items-center gap-2">
-                <button
-                  onClick={()=>{ setEditProduct(null); setShowModal(true); }}
-                  className="flex items-center gap-1.5 px-4 py-2.5 rounded-2xl text-white font-bold text-sm fab-shadow"
-                  style={{background:'linear-gradient(135deg, var(--primary) 0%, #7C3AED 100%)'}}>
-                  <span className="text-lg leading-none">+</span> Thêm SP
-                </button>
+                {activePage === 'products' && (
+                  <button onClick={()=>{ setEditProduct(null); setShowModal(true); }}
+                    className="flex items-center gap-1.5 px-4 py-2.5 rounded-2xl text-white font-bold text-sm fab-shadow"
+                    style={{background:'linear-gradient(135deg, var(--primary) 0%, #7C3AED 100%)'}}>
+                    <span className="text-lg leading-none">+</span> Thêm SP
+                  </button>
+                )}
                 <button onClick={()=>sb.auth.signOut()}
                   className="text-xs px-3 py-2.5 rounded-xl font-semibold"
                   style={{background:'var(--card)', color:'var(--muted)', border:'1px solid var(--border)'}}>
@@ -795,46 +1054,63 @@
               </div>
             </div>
 
-            {/* Channel filter */}
-            <div className="flex gap-2 overflow-x-auto no-scrollbar pb-2 -mx-1 px-1">
-              {[{id:'all',label:'Tất cả'}, ...chList.map(c=>({id:c,label:c}))].map(ch=>(
-                <button key={ch.id} onClick={()=>setActiveChannel(ch.id)}
-                  className="flex-shrink-0 px-3.5 py-1.5 rounded-full text-xs font-bold"
+            {/* Page tabs */}
+            <div className="flex gap-2 mb-3">
+              {[['products','🛍 Sản phẩm'],['expenses','💰 Chi phí']].map(([page,label])=>(
+                <button key={page} onClick={()=>setActivePage(page)}
+                  className="px-4 py-2 rounded-full text-sm font-bold"
                   style={{
-                    background: activeChannel===ch.id ? 'var(--primary)' : 'var(--card)',
-                    color:      activeChannel===ch.id ? '#fff' : 'var(--muted)',
-                    border:     `1.5px solid ${activeChannel===ch.id ? 'var(--primary)' : 'var(--border)'}`,
-                    transition: 'all 0.2s',
+                    background: activePage===page ? 'var(--primary)' : 'var(--card)',
+                    color:      activePage===page ? '#fff' : 'var(--muted)',
+                    border:     `1.5px solid ${activePage===page ? 'var(--primary)' : 'var(--border)'}`,
                   }}>
-                  {ch.label}
+                  {label}
                 </button>
               ))}
             </div>
 
-            {/* Status filter */}
-            <div className="flex gap-2 overflow-x-auto no-scrollbar pb-3 -mx-1 px-1">
-              {statusFilters.map(sf=>{
-                const active = activeStatus === sf.id;
-                return (
-                  <button key={sf.id} onClick={()=>setActiveStatus(sf.id)}
-                    className="flex-shrink-0 px-3.5 py-1.5 rounded-full text-xs font-bold flex items-center gap-1"
+            {/* Channel + status filters — only on products page */}
+            {activePage === 'products' && (<>
+              <div className="flex gap-2 overflow-x-auto no-scrollbar pb-2 -mx-1 px-1">
+                {[{id:'all',label:'Tất cả'}, ...chList.map(c=>({id:c,label:c}))].map(ch=>(
+                  <button key={ch.id} onClick={()=>setActiveChannel(ch.id)}
+                    className="flex-shrink-0 px-3.5 py-1.5 rounded-full text-xs font-bold"
                     style={{
-                      background: active ? (sf.bg || 'var(--primary)') : 'var(--card)',
-                      color:      active ? (sf.fg || '#fff')            : 'var(--muted)',
-                      border:     `1.5px solid ${active ? (sf.ring || 'var(--primary)') : 'var(--border)'}`,
+                      background: activeChannel===ch.id ? 'var(--primary)' : 'var(--card)',
+                      color:      activeChannel===ch.id ? '#fff' : 'var(--muted)',
+                      border:     `1.5px solid ${activeChannel===ch.id ? 'var(--primary)' : 'var(--border)'}`,
                       transition: 'all 0.2s',
                     }}>
-                    {sf.dot && <span className="w-1.5 h-1.5 rounded-full" style={{background: active ? sf.dot : '#C4B8F5'}} />}
-                    {sf.label}
+                    {ch.label}
                   </button>
-                );
-              })}
-            </div>
+                ))}
+              </div>
+              <div className="flex gap-2 overflow-x-auto no-scrollbar pb-3 -mx-1 px-1">
+                {statusFilters.map(sf=>{
+                  const active = activeStatus === sf.id;
+                  return (
+                    <button key={sf.id} onClick={()=>setActiveStatus(sf.id)}
+                      className="flex-shrink-0 px-3.5 py-1.5 rounded-full text-xs font-bold flex items-center gap-1"
+                      style={{
+                        background: active ? (sf.bg || 'var(--primary)') : 'var(--card)',
+                        color:      active ? (sf.fg || '#fff')            : 'var(--muted)',
+                        border:     `1.5px solid ${active ? (sf.ring || 'var(--primary)') : 'var(--border)'}`,
+                        transition: 'all 0.2s',
+                      }}>
+                      {sf.dot && <span className="w-1.5 h-1.5 rounded-full" style={{background: active ? sf.dot : '#C4B8F5'}} />}
+                      {sf.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </>)}
           </div>
 
-          {/* Product list */}
+          {/* Content */}
           <div className="px-4 space-y-3">
-            {filtered.length === 0 ? (
+            {activePage === 'expenses' ? (
+              <ExpensePage channels={chList} />
+            ) : filtered.length === 0 ? (
               <div className="text-center py-20">
                 <div className="text-6xl mb-4">✦</div>
                 <p className="font-semibold mb-1" style={{color:'var(--text)'}}>Không có sản phẩm nào</p>
