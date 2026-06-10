@@ -969,7 +969,9 @@
                         {[['revenue','Doanh thu'],['commission','Hoa hồng'],['actual_received','Thực nhận']].map(([fk,label])=>(
                           <div key={fk}>
                             <p className="text-xs mb-1" style={{color:'var(--muted)'}}>{label}</p>
-                            <input value={f[fk]||''} onChange={e=>setRevField(m,ch,fk,e.target.value)}
+                            <input
+                              value={f[fk] ? new Intl.NumberFormat('vi-VN').format(Number(f[fk])) : ''}
+                              onChange={e=>setRevField(m,ch,fk,e.target.value.replace(/\D/g,''))}
                               placeholder="0" inputMode="numeric"
                               className="w-full px-2.5 py-2 rounded-xl text-sm outline-none font-semibold"
                               style={{background:'var(--bg)', color:'var(--text)', border:'1.5px solid var(--border)'}} />
