@@ -1106,6 +1106,14 @@
 
       if (!session) return <LoginPage />;
 
+      const chFiltered = products.filter(p => activeChannel === 'all' || p.channel === activeChannel);
+      const statusCount = {
+        all:        chFiltered.length,
+        post_today: chFiltered.filter(p => p.post_today || p.scheduled_date === today).length,
+        tomorrow:   chFiltered.filter(p => p.scheduled_date === TOMORROW).length,
+        ...Object.fromEntries(STATUSES.map(s => [s.id, chFiltered.filter(p => p.status === s.id).length])),
+      };
+
       const statusFilters = [
         { id:'all',        label:'Tất cả' },
         { id:'post_today', label:'📌 Hôm nay' },
@@ -1190,7 +1198,7 @@
                   const active = activeStatus === sf.id;
                   return (
                     <button key={sf.id} onClick={()=>setActiveStatus(sf.id)}
-                      className="flex-shrink-0 px-3.5 py-1.5 rounded-full text-xs font-bold flex items-center gap-1"
+                      className="flex-shrink-0 px-3.5 py-1.5 rounded-full text-xs font-bold flex items-center gap-1.5"
                       style={{
                         background: active ? (sf.bg || 'var(--primary)') : 'var(--card)',
                         color:      active ? (sf.fg || '#fff')            : 'var(--muted)',
@@ -1199,6 +1207,16 @@
                       }}>
                       {sf.dot && <span className="w-1.5 h-1.5 rounded-full" style={{background: active ? sf.dot : '#C4B8F5'}} />}
                       {sf.label}
+                      {statusCount[sf.id] > 0 && (
+                        <span className="rounded-full px-1.5 py-0.5 text-xs font-bold leading-none"
+                          style={{
+                            background: active ? 'rgba(0,0,0,0.15)' : 'var(--bg)',
+                            color:      active ? (sf.fg || '#fff')  : 'var(--primary)',
+                            minWidth: '1.25rem', textAlign: 'center',
+                          }}>
+                          {statusCount[sf.id]}
+                        </span>
+                      )}
                     </button>
                   );
                 })}
