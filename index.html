@@ -750,38 +750,43 @@
     }
 
     // ── ExpensePage ───────────────────────────────────────────────────────────────
+    function monthsInRange(from, to) {
+      const ms = [], d = new Date(from+'-01'), end = new Date(to+'-01');
+      while (d <= end) { ms.push(d.toISOString().slice(0,7)); d.setMonth(d.getMonth()+1); }
+      return ms;
+    }
+
     function ExpensePage({ channels }) {
-      const [selMonth,    setSelMonth]    = useState(()=>TODAY().slice(0,7));
-      const [expenses,    setExpenses]    = useState([]);
-      const [revenues,    setRevenues]    = useState([]);
-      const [revForms,    setRevForms]    = useState({});
-      const [savingRev,   setSavingRev]   = useState({});
-      const [showExpModal,setShowExpModal]= useState(false);
+      const curM = TODAY().slice(0,7);
+      const [fromM,        setFromM]        = useState(curM);
+      const [toM,          setToM]          = useState(curM);
+      const [filterCh,     setFilterCh]     = useState('all');
+      const [expenses,     setExpenses]     = useState([]);
+      const [revenues,     setRevenues]     = useState([]);
+      const [revForms,     setRevForms]     = useState({});
+      const [savingRev,    setSavingRev]    = useState({});
+      const [showExpModal, setShowExpModal] = useState(false);
 
-      useEffect(() => { fetchExpenses(); fetchRevenues(); }, [selMonth]);
+      useEffect(() => { fetchAll(); }, [fromM, toM, filterCh]);
 
-      async function fetchExpenses() {
-        const y = selMonth.slice(0,4), mo = selMonth.slice(5,7);
-        const last = new Date(Number(y), Number(mo), 0).getDate();
-        const { data } = await sb.from('expenses').select('*')
-          .gte('date', `${selMonth}-01`).lte('date', `${selMonth}-${last}`)
-          .order('date', {ascending:false});
-        if (data) setExpenses(data);
-      }
+      async function fetchAll() {
+        const months = monthsInRange(fromM, toM);
+        if (!months.length) return;
+        const lastD = (() => { const d=new Date(toM+'-01'); d.setMonth(d.getMonth()+1); d.setDate(0); return String(d.getDate()).padStart(2,'0'); })();
+        let eq = sb.from('expenses').select('*').gte('date',fromM+'-01').lte('date',`${toM}-${lastD}`).order('date',{ascending:false});
+        if (filterCh !== 'all') eq = eq.eq('channel', filterCh);
+        const {data:eData} = await eq;
+        if (eData) setExpenses(eData);
 
-      async function fetchRevenues() {
-        const { data } = await sb.from('revenues').select('*').eq('month', selMonth).order('channel');
-        if (data) {
-          setRevenues(data);
-          const f = {};
-          data.forEach(r => { f[r.channel] = {revenue:r.revenue, commission:r.commission, actual_received:r.actual_received, note:r.note||''}; });
+        let rq = sb.from('revenues').select('*').in('month', months);
+        if (filterCh !== 'all') rq = rq.eq('channel', filterCh);
+        const {data:rData} = await rq;
+        if (rData) {
+          setRevenues(rData);
+          const f={};
+          rData.forEach(r => { f[r.month+'|'+r.channel]={revenue:r.revenue,commission:r.commission,actual_received:r.actual_received,note:r.note||''}; });
           setRevForms(f);
         }
-      }
-
-      function shiftMonth(delta) {
-        const d = new Date(selMonth + '-01'); d.setMonth(d.getMonth()+delta);
-        setSelMonth(d.toISOString().slice(0,7));
       }
 
       async function deleteExp(id) {
@@ -790,67 +795,132 @@
         setExpenses(prev=>prev.filter(e=>e.id!==id));
       }
 
-      async function saveRevenue(channel) {
-        const f = revForms[channel]||{};
-        setSavingRev(s=>({...s,[channel]:true}));
-        const payload = {month:selMonth, channel, revenue:Number(f.revenue||0), commission:Number(f.commission||0), actual_received:Number(f.actual_received||0), note:f.note||''};
+      async function saveRevenue(month, channel) {
+        const key = month+'|'+channel;
+        const f = revForms[key]||{};
+        setSavingRev(s=>({...s,[key]:true}));
+        const payload = {month, channel, revenue:Number(f.revenue||0), commission:Number(f.commission||0), actual_received:Number(f.actual_received||0), note:f.note||''};
         const {data,error} = await sb.from('revenues').upsert(payload,{onConflict:'month,channel'}).select().single();
-        if (!error&&data) setRevenues(prev=>{const ex=prev.find(r=>r.channel===channel); return ex?prev.map(r=>r.channel===channel?data:r):[...prev,data];});
-        setSavingRev(s=>({...s,[channel]:false}));
+        if (!error&&data) setRevenues(prev=>{ const ex=prev.find(r=>r.month===month&&r.channel===channel); return ex?prev.map(r=>r.month===month&&r.channel===channel?data:r):[...prev,data]; });
+        setSavingRev(s=>({...s,[key]:false}));
       }
 
-      function setRevField(channel,key,val) {
-        setRevForms(f=>({...f,[channel]:{...(f[channel]||{}), [key]:val}}));
+      function setRevField(month, channel, key, val) {
+        const k = month+'|'+channel;
+        setRevForms(f=>({...f,[k]:{...(f[k]||{}), [key]:val}}));
       }
 
-      const totalExp   = expenses.reduce((s,e)=>s+(e.amount||0),0);
-      const totalRecv  = revenues.reduce((s,r)=>s+(r.actual_received||0),0);
-      const profit     = totalRecv - totalExp;
-      const revChannels = [...new Set([...channels, 'Tổng'])];
+      const allMonths   = monthsInRange(fromM, toM);
+      const monthStats  = allMonths.map(m => {
+        const mExp = expenses.filter(e=>e.date.startsWith(m)).reduce((s,e)=>s+(e.amount||0),0);
+        const mRev = revenues.filter(r=>r.month===m).reduce((s,r)=>s+(r.actual_received||0),0);
+        return {m, exp:mExp, rev:mRev, profit:mRev-mExp};
+      });
+      const totExp    = monthStats.reduce((s,x)=>s+x.exp,0);
+      const totRev    = monthStats.reduce((s,x)=>s+x.rev,0);
+      const totProfit = totRev - totExp;
+      const revChs    = filterCh==='all' ? [...channels,'Tổng'] : [filterCh];
 
       return (
-        <div>
-          {/* Month navigator */}
-          <div className="flex items-center justify-center gap-4 mb-4">
-            <button onClick={()=>shiftMonth(-1)}
-              className="w-9 h-9 rounded-xl flex items-center justify-center font-bold text-lg"
-              style={{background:'var(--card)', color:'var(--primary)', border:'1.5px solid var(--border)'}}>‹</button>
-            <span className="font-display text-lg font-bold" style={{color:'var(--text)'}}>{fmtMonth(selMonth)}</span>
-            <button onClick={()=>shiftMonth(1)}
-              className="w-9 h-9 rounded-xl flex items-center justify-center font-bold text-lg"
-              style={{background:'var(--card)', color:'var(--primary)', border:'1.5px solid var(--border)'}}>›</button>
+        <div className="space-y-4">
+          {/* Filters */}
+          <div className="rounded-2xl p-4 card-shadow space-y-3" style={{background:'var(--card)'}}>
+            <div>
+              <p className="text-xs font-bold uppercase tracking-wide mb-2" style={{color:'var(--muted)'}}>Kênh</p>
+              <div className="flex gap-2 flex-wrap">
+                {[{id:'all',label:'Tất cả'}, ...channels.map(c=>({id:c,label:c}))].map(ch=>(
+                  <button key={ch.id} onClick={()=>setFilterCh(ch.id)}
+                    className="px-3 py-1.5 rounded-full text-xs font-bold"
+                    style={{background:filterCh===ch.id?'var(--primary)':'var(--bg)', color:filterCh===ch.id?'#fff':'var(--muted)', border:`1.5px solid ${filterCh===ch.id?'var(--primary)':'var(--border)'}`}}>
+                    {ch.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="flex gap-3">
+              <div className="flex-1">
+                <p className="text-xs font-bold uppercase tracking-wide mb-1" style={{color:'var(--muted)'}}>Từ tháng</p>
+                <input type="month" value={fromM} onChange={e=>{setFromM(e.target.value); if(e.target.value>toM) setToM(e.target.value);}}
+                  className="w-full px-3 py-2 rounded-xl text-sm outline-none"
+                  style={{background:'var(--bg)', color:'var(--text)', border:'1.5px solid var(--border)'}} />
+              </div>
+              <div className="flex-1">
+                <p className="text-xs font-bold uppercase tracking-wide mb-1" style={{color:'var(--muted)'}}>Đến tháng</p>
+                <input type="month" value={toM} onChange={e=>{setToM(e.target.value); if(e.target.value<fromM) setFromM(e.target.value);}}
+                  className="w-full px-3 py-2 rounded-xl text-sm outline-none"
+                  style={{background:'var(--bg)', color:'var(--text)', border:'1.5px solid var(--border)'}} />
+              </div>
+            </div>
           </div>
 
-          {/* Stats */}
-          <div className="grid gap-3 mb-5" style={{gridTemplateColumns:'1fr 1fr 1fr'}}>
+          {/* Summary stats */}
+          <div className="grid gap-3" style={{gridTemplateColumns:'1fr 1fr 1fr'}}>
             <div className="rounded-2xl p-3 card-shadow" style={{background:'var(--card)'}}>
               <p className="text-xs font-semibold mb-1" style={{color:'var(--muted)'}}>Chi phí tools</p>
-              <p className="text-lg font-bold font-display" style={{color:'var(--primary)'}}>{fmtCurrency(totalExp)}</p>
+              <p className="font-bold font-display text-base" style={{color:'var(--primary)'}}>{fmtCurrency(totExp)}</p>
             </div>
             <div className="rounded-2xl p-3 card-shadow" style={{background:'var(--card)'}}>
               <p className="text-xs font-semibold mb-1" style={{color:'var(--muted)'}}>Thực nhận</p>
-              <p className="text-lg font-bold font-display" style={{color:'#065F46'}}>{fmtCurrency(totalRecv)}</p>
+              <p className="font-bold font-display text-base" style={{color:'#065F46'}}>{fmtCurrency(totRev)}</p>
             </div>
-            <div className="rounded-2xl p-3" style={{background: profit>=0?'#ECFDF5':'#FFF0F0', border:`1.5px solid ${profit>=0?'#6EE7B7':'#FCA5A5'}`}}>
-              <p className="text-xs font-semibold mb-1" style={{color: profit>=0?'#065F46':'#DC2626'}}>Lợi nhuận</p>
-              <p className="text-lg font-bold font-display" style={{color: profit>=0?'#065F46':'#DC2626'}}>{profit>=0?'+':''}{fmtCurrency(profit)}</p>
+            <div className="rounded-2xl p-3" style={{background:totProfit>=0?'#ECFDF5':'#FFF0F0', border:`1.5px solid ${totProfit>=0?'#6EE7B7':'#FCA5A5'}`}}>
+              <p className="text-xs font-semibold mb-1" style={{color:totProfit>=0?'#065F46':'#DC2626'}}>Lợi nhuận</p>
+              <p className="font-bold font-display text-base" style={{color:totProfit>=0?'#065F46':'#DC2626'}}>{totProfit>=0?'+':''}{fmtCurrency(totProfit)}</p>
             </div>
           </div>
 
-          {/* Expenses */}
-          <div className="rounded-2xl overflow-hidden card-shadow mb-4" style={{background:'var(--card)'}}>
+          {/* Monthly breakdown — only if >1 month */}
+          {allMonths.length > 1 && (
+            <div className="rounded-2xl overflow-hidden card-shadow" style={{background:'var(--card)'}}>
+              <div className="px-4 py-3" style={{borderBottom:'1px solid var(--border)'}}>
+                <h3 className="font-bold text-sm" style={{color:'var(--text)'}}>Theo tháng</h3>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr style={{background:'var(--bg)'}}>
+                      {['Tháng','Chi phí','Thực nhận','Lợi nhuận'].map(h=>(
+                        <th key={h} className={`py-2 text-xs font-bold ${h==='Tháng'?'text-left px-4':'text-right px-3'}`}
+                          style={{color:'var(--muted)'}}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {monthStats.map(({m,exp,rev,profit})=>(
+                      <tr key={m} style={{borderTop:'1px solid var(--border)'}}>
+                        <td className="px-4 py-2.5 font-semibold" style={{color:'var(--text)'}}>{fmtMonth(m)}</td>
+                        <td className="px-3 py-2.5 text-right" style={{color:'var(--primary)'}}>{fmtCurrency(exp)}</td>
+                        <td className="px-3 py-2.5 text-right" style={{color:'#065F46'}}>{fmtCurrency(rev)}</td>
+                        <td className="px-3 py-2.5 text-right font-bold" style={{color:profit>=0?'#065F46':'#DC2626'}}>{profit>=0?'+':''}{fmtCurrency(profit)}</td>
+                      </tr>
+                    ))}
+                    <tr style={{borderTop:'2px solid var(--border)', background:'var(--bg)'}}>
+                      <td className="px-4 py-2.5 font-bold" style={{color:'var(--text)'}}>Tổng</td>
+                      <td className="px-3 py-2.5 text-right font-bold" style={{color:'var(--primary)'}}>{fmtCurrency(totExp)}</td>
+                      <td className="px-3 py-2.5 text-right font-bold" style={{color:'#065F46'}}>{fmtCurrency(totRev)}</td>
+                      <td className="px-3 py-2.5 text-right font-bold" style={{color:totProfit>=0?'#065F46':'#DC2626'}}>{totProfit>=0?'+':''}{fmtCurrency(totProfit)}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* Expenses list */}
+          <div className="rounded-2xl overflow-hidden card-shadow" style={{background:'var(--card)'}}>
             <div className="flex items-center justify-between px-4 py-3" style={{borderBottom:'1px solid var(--border)'}}>
-              <h3 className="font-bold text-sm" style={{color:'var(--text)'}}>Chi phí tools tháng này</h3>
+              <h3 className="font-bold text-sm" style={{color:'var(--text)'}}>Chi phí tools</h3>
               <button onClick={()=>setShowExpModal(true)}
                 className="text-xs px-3 py-1.5 rounded-xl font-bold text-white"
                 style={{background:'var(--primary)'}}>+ Thêm</button>
             </div>
-            {expenses.length === 0 ? (
-              <p className="text-sm text-center py-6" style={{color:'var(--muted)'}}>Chưa có khoản chi nào</p>
-            ) : (
-              expenses.map(e=>(
+            {expenses.length === 0
+              ? <p className="text-sm text-center py-5" style={{color:'var(--muted)'}}>Chưa có khoản chi nào</p>
+              : expenses.map(e=>(
                 <div key={e.id} className="flex items-center gap-2 px-4 py-2.5" style={{borderBottom:'1px solid var(--border)'}}>
-                  <span className="text-xs font-bold flex-shrink-0" style={{color:'var(--muted)', minWidth:'3rem'}}>{fmtDate(e.date)}</span>
+                  <div className="flex-shrink-0 text-xs font-bold" style={{color:'var(--muted)', minWidth:'3.5rem'}}>
+                    {allMonths.length>1 ? e.date.slice(0,7).split('-').reverse().join('/') : fmtDate(e.date)}
+                  </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold truncate" style={{color:'var(--text)'}}>{e.tool_name}</p>
                     {(e.channel||e.note) && <p className="text-xs truncate" style={{color:'var(--muted)'}}>{[e.channel,e.note].filter(Boolean).join(' · ')}</p>}
@@ -861,53 +931,60 @@
                     style={{background:'#FFF0F0', color:'#EF4444'}}>🗑</button>
                 </div>
               ))
-            )}
+            }
             {expenses.length > 0 && (
-              <div className="flex justify-end px-4 py-2.5" style={{background:'var(--bg)'}}>
-                <span className="text-sm font-bold" style={{color:'var(--primary)'}}>Tổng: {fmtCurrency(totalExp)}</span>
+              <div className="flex justify-end px-4 py-2" style={{background:'var(--bg)'}}>
+                <span className="text-sm font-bold" style={{color:'var(--primary)'}}>Tổng: {fmtCurrency(totExp)}</span>
               </div>
             )}
           </div>
 
-          {/* Revenue */}
+          {/* Revenue per month */}
           <div className="rounded-2xl overflow-hidden card-shadow" style={{background:'var(--card)'}}>
             <div className="px-4 py-3" style={{borderBottom:'1px solid var(--border)'}}>
-              <h3 className="font-bold text-sm" style={{color:'var(--text)'}}>Doanh thu tháng này</h3>
+              <h3 className="font-bold text-sm" style={{color:'var(--text)'}}>Doanh thu</h3>
               <p className="text-xs mt-0.5" style={{color:'var(--muted)'}}>Nhập xong bấm Lưu từng kênh</p>
             </div>
-            {revChannels.map(ch=>{
-              const f = revForms[ch]||{};
-              const isSaving = !!savingRev[ch];
-              return (
-                <div key={ch} className="px-4 py-3" style={{borderBottom:'1px solid var(--border)'}}>
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-bold px-2 py-0.5 rounded-full"
-                      style={{background:'var(--p-light)', color:'var(--primary)'}}>{ch}</span>
-                    <button onClick={()=>saveRevenue(ch)} disabled={isSaving}
-                      className="text-xs px-3 py-1.5 rounded-xl font-bold"
-                      style={{background: isSaving?'#A78BFA':'var(--primary)', color:'#fff'}}>
-                      {isSaving?'Lưu...':'Lưu ✓'}
-                    </button>
+            {allMonths.map(m=>(
+              <div key={m}>
+                {allMonths.length > 1 && (
+                  <div className="px-4 py-2" style={{background:'var(--bg)', borderBottom:'1px solid var(--border)'}}>
+                    <span className="font-bold text-sm" style={{color:'var(--primary)'}}>{fmtMonth(m)}</span>
                   </div>
-                  <div className="grid gap-2" style={{gridTemplateColumns:'1fr 1fr 1fr'}}>
-                    {[['revenue','Doanh thu'],['commission','Hoa hồng'],['actual_received','Thực nhận']].map(([key,label])=>(
-                      <div key={key}>
-                        <p className="text-xs mb-1" style={{color:'var(--muted)'}}>{label}</p>
-                        <input value={f[key]||''} onChange={e=>setRevField(ch,key,e.target.value)}
-                          placeholder="0" inputMode="numeric"
-                          className="w-full px-2.5 py-2 rounded-xl text-sm outline-none font-semibold"
-                          style={{background:'var(--bg)', color:'var(--text)', border:'1.5px solid var(--border)'}} />
+                )}
+                {revChs.map(ch=>{
+                  const key=m+'|'+ch, f=revForms[key]||{}, isSaving=!!savingRev[key];
+                  return (
+                    <div key={ch} className="px-4 py-3" style={{borderBottom:'1px solid var(--border)'}}>
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs font-bold px-2.5 py-0.5 rounded-full"
+                          style={{background:'var(--p-light)', color:'var(--primary)'}}>{ch}</span>
+                        <button onClick={()=>saveRevenue(m,ch)} disabled={isSaving}
+                          className="text-xs px-3 py-1.5 rounded-xl font-bold"
+                          style={{background:isSaving?'#A78BFA':'var(--primary)', color:'#fff'}}>
+                          {isSaving?'Lưu...':'Lưu ✓'}
+                        </button>
                       </div>
-                    ))}
-                  </div>
-                  {f.actual_received > 0 && <p className="text-xs mt-1.5 font-semibold" style={{color:'#065F46'}}>✓ Thực nhận: {fmtCurrency(Number(f.actual_received))}</p>}
-                </div>
-              );
-            })}
+                      <div className="grid gap-2" style={{gridTemplateColumns:'1fr 1fr 1fr'}}>
+                        {[['revenue','Doanh thu'],['commission','Hoa hồng'],['actual_received','Thực nhận']].map(([fk,label])=>(
+                          <div key={fk}>
+                            <p className="text-xs mb-1" style={{color:'var(--muted)'}}>{label}</p>
+                            <input value={f[fk]||''} onChange={e=>setRevField(m,ch,fk,e.target.value)}
+                              placeholder="0" inputMode="numeric"
+                              className="w-full px-2.5 py-2 rounded-xl text-sm outline-none font-semibold"
+                              style={{background:'var(--bg)', color:'var(--text)', border:'1.5px solid var(--border)'}} />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
           </div>
 
           {showExpModal && (
-            <ExpenseModal selMonth={selMonth} channels={channels}
+            <ExpenseModal selMonth={toM} channels={channels}
               onSave={d=>{setExpenses(p=>[d,...p]); setShowExpModal(false);}}
               onClose={()=>setShowExpModal(false)} />
           )}
