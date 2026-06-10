@@ -953,28 +953,48 @@
                   </div>
                 )}
                 {revChs.map(ch=>{
+                  const isTong = ch === 'Tổng';
                   const key=m+'|'+ch, f=revForms[key]||{}, isSaving=!!savingRev[key];
+                  // Tổng row: auto-sum all real channels for this month
+                  const tongVals = isTong
+                    ? ['revenue','commission','actual_received'].reduce((acc,fk)=>{
+                        acc[fk] = channels.reduce((s,c)=>s+Number((revForms[m+'|'+c]||{})[fk]||0),0);
+                        return acc;
+                      },{})
+                    : null;
+                  const vals = isTong ? tongVals : f;
                   return (
-                    <div key={ch} className="px-4 py-3" style={{borderBottom:'1px solid var(--border)'}}>
+                    <div key={ch} className="px-4 py-3" style={{borderBottom:'1px solid var(--border)', background:isTong?'var(--bg)':''}}>
                       <div className="flex items-center justify-between mb-2">
                         <span className="text-xs font-bold px-2.5 py-0.5 rounded-full"
-                          style={{background:'var(--p-light)', color:'var(--primary)'}}>{ch}</span>
-                        <button onClick={()=>saveRevenue(m,ch)} disabled={isSaving}
-                          className="text-xs px-3 py-1.5 rounded-xl font-bold"
-                          style={{background:isSaving?'#A78BFA':'var(--primary)', color:'#fff'}}>
-                          {isSaving?'Lưu...':'Lưu ✓'}
-                        </button>
+                          style={{background:isTong?'#E0E7FF':'var(--p-light)', color:isTong?'#3730A3':'var(--primary)'}}>
+                          {ch}
+                        </span>
+                        {!isTong && (
+                          <button onClick={()=>saveRevenue(m,ch)} disabled={isSaving}
+                            className="text-xs px-3 py-1.5 rounded-xl font-bold"
+                            style={{background:isSaving?'#A78BFA':'var(--primary)', color:'#fff'}}>
+                            {isSaving?'Lưu...':'Lưu ✓'}
+                          </button>
+                        )}
                       </div>
                       <div className="grid gap-2" style={{gridTemplateColumns:'1fr 1fr 1fr'}}>
                         {[['revenue','Doanh thu'],['commission','Hoa hồng'],['actual_received','Thực nhận']].map(([fk,label])=>(
                           <div key={fk}>
                             <p className="text-xs mb-1" style={{color:'var(--muted)'}}>{label}</p>
-                            <input
-                              value={f[fk] ? new Intl.NumberFormat('vi-VN').format(Number(f[fk])) : ''}
-                              onChange={e=>setRevField(m,ch,fk,e.target.value.replace(/\D/g,''))}
-                              placeholder="0" inputMode="numeric"
-                              className="w-full px-2.5 py-2 rounded-xl text-sm outline-none font-semibold"
-                              style={{background:'var(--bg)', color:'var(--text)', border:'1.5px solid var(--border)'}} />
+                            {isTong ? (
+                              <div className="w-full px-2.5 py-2 rounded-xl text-sm font-bold"
+                                style={{background:'#E0E7FF', color:'#3730A3', border:'1.5px solid #C7D2FE'}}>
+                                {new Intl.NumberFormat('vi-VN').format(vals[fk]||0)}
+                              </div>
+                            ) : (
+                              <input
+                                value={vals[fk] ? new Intl.NumberFormat('vi-VN').format(Number(vals[fk])) : ''}
+                                onChange={e=>setRevField(m,ch,fk,e.target.value.replace(/\D/g,''))}
+                                placeholder="0" inputMode="numeric"
+                                className="w-full px-2.5 py-2 rounded-xl text-sm outline-none font-semibold"
+                                style={{background:'var(--bg)', color:'var(--text)', border:'1.5px solid var(--border)'}} />
+                            )}
                           </div>
                         ))}
                       </div>
