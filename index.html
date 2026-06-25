@@ -65,6 +65,56 @@
     const fmtDate = d => { if (!d) return ''; const [y,m,dd]=d.split('-'); return `${dd}/${m}`; };
     const fmtMonth = m => { if (!m) return ''; const [y,mo]=m.split('-'); return `Tháng ${parseInt(mo)}/${y}`; };
     const fmtCurrency = n => new Intl.NumberFormat('vi-VN').format(n||0) + 'đ';
+    const digitsOnly = v => String(v || '').replace(/\D/g, '');
+    let productCodeColumnWarningShown = false;
+    const isMissingColumnError = (err, col) => {
+      const msg = `${err?.message || ''} ${err?.details || ''} ${err?.hint || ''}`.toLowerCase();
+      return msg.includes(col.toLowerCase()) && (msg.includes('column') || msg.includes('schema cache'));
+    };
+
+    function getProductCode(p) {
+      return digitsOnly(p?.product_code);
+    }
+
+    function nextProductCode(list) {
+      const max = (list || []).reduce((n, p) => {
+        const code = Number(getProductCode(p));
+        return Number.isFinite(code) ? Math.max(n, code) : n;
+      }, 0);
+      return String(max + 1);
+    }
+
+    async function fetchNextProductCode(exceptId) {
+      const { data, error } = await sb.from('products').select('id, product_code');
+      if (error && isMissingColumnError(error, 'product_code')) {
+        warnMissingProductCodeColumn();
+        throw error;
+      }
+      if (error) throw error;
+      return nextProductCode((data || []).filter(p => p.id !== exceptId));
+    }
+
+    function warnMissingProductCodeColumn() {
+      if (productCodeColumnWarningShown) return;
+      productCodeColumnWarningShown = true;
+      alert('Cần thêm cột product_code trong bảng products để lưu mã sản phẩm riêng. Mở Supabase SQL Editor và chạy: alter table products add column if not exists product_code text;');
+    }
+
+    async function copyText(text) {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        return;
+      }
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.left = '-9999px';
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+    }
 
     function sortProducts(list) {
       const today = TODAY();
@@ -174,6 +224,8 @@
     function ProductCard({ product: p, onUpdate, onDelete, onEdit }) {
       const st = getStatus(p.status);
       const dateRef = useRef();
+      const [copied, setCopied] = useState(false);
+      const productCode = getProductCode(p);
       const today = TODAY();
       const isToday     = p.scheduled_date === today;
       const isPostToday = p.post_today || isToday;
@@ -197,6 +249,11 @@
         const d = val || null;
         await sb.from('products').update({scheduled_date: d}).eq('id',p.id);
         onUpdate({...p, scheduled_date: d});
+      }
+      async function copyProductCode() {
+        await copyText(productCode);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1200);
       }
 
       return (
@@ -249,6 +306,13 @@
               </div>
 
               <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                {productCode && <button onClick={copyProductCode} title="Bấm để copy mã sản phẩm"
+                  className="text-xs px-2.5 py-0.5 rounded-full font-bold flex items-center gap-1"
+                  style={{background:'#ECFDF5', color:'#065F46', border:'1px solid #6EE7B7'}}>
+                  <span>#</span>
+                  {productCode}
+                  <span style={{opacity:.75}}>{copied ? '✓' : '⧉'}</span>
+                </button>}
                 <span className="text-xs px-2.5 py-0.5 rounded-full font-semibold"
                   style={{background:'var(--p-light)', color:'var(--primary)'}}>{p.channel}</span>
                 <button onClick={cycleStatus}
@@ -324,6 +388,7 @@
         name:           product?.name||'',
         link:           product?.link||'',
         image_data:     product?.image_data||'',
+        product_code:   product ? getProductCode(product) : '',
         channel:        product?.channel||(channels[0]||''),
         new_channel:    '',
         status:         product?.status||'chua_ro',
@@ -334,6 +399,11 @@
       const [saving,     setSaving]     = useState(false);
       const [editCh,     setEditCh]     = useState(false);
       const fileRef = useRef();
+
+      useEffect(() => {
+        if (editing || form.product_code) return;
+        fetchNextProductCode().then(code => set('product_code', code)).catch(() => {});
+      }, []);
 
       async function moveCh(name, dir) {
         const idx = channels.indexOf(name);
@@ -409,16 +479,18 @@
         const ch = form.new_channel.trim() || form.channel;
         if (!ch) return alert('Chọn hoặc nhập kênh');
         setSaving(true);
-        const payload = {
-          name:           form.name.trim(),
-          link:           form.link.trim(),
-          image_data:     form.image_data,
-          channel:        ch,
-          status:         form.status,
-          note:           form.note.trim(),
-          scheduled_date: form.scheduled_date || null,
-        };
         try {
+          const productCode = digitsOnly(form.product_code) || await fetchNextProductCode(editing ? product.id : null);
+          const payload = {
+            name:           form.name.trim(),
+            link:           form.link.trim(),
+            image_data:     form.image_data,
+            product_code:   productCode,
+            channel:        ch,
+            status:         form.status,
+            note:           form.note.trim(),
+            scheduled_date: form.scheduled_date || null,
+          };
           // nếu là kênh mới → thêm vào channels table
           if (!channels.includes(ch)) {
             await sb.from('channels').upsert({ name: ch, position: channels.length }, { onConflict: 'name' });
@@ -426,10 +498,18 @@
           }
           if (editing) {
             const { data, error } = await sb.from('products').update(payload).eq('id',product.id).select().single();
+            if (error && isMissingColumnError(error, 'product_code')) {
+              warnMissingProductCodeColumn();
+              throw error;
+            }
             if (error) throw error;
             onSave(data);
           } else {
             const { data, error } = await sb.from('products').insert({...payload, video_count:0, post_today:false}).select().single();
+            if (error && isMissingColumnError(error, 'product_code')) {
+              warnMissingProductCodeColumn();
+              throw error;
+            }
             if (error) throw error;
             onSave(data);
           }
@@ -486,6 +566,23 @@
                   placeholder="Tên sản phẩm"
                   className="w-full px-4 py-3 rounded-2xl text-sm outline-none"
                   style={{background:'var(--bg)', color:'var(--text)', border:'1.5px solid var(--border)'}} />
+              </div>
+
+              {/* Product code */}
+              <div>
+                <label className="text-xs font-bold mb-1.5 block tracking-wide uppercase" style={{color:'var(--muted)'}}>Mã sản phẩm</label>
+                <div className="flex gap-2">
+                  <input value={form.product_code} onChange={e=>set('product_code',digitsOnly(e.target.value))}
+                    placeholder="Chỉ nhập số"
+                    inputMode="numeric"
+                    className="flex-1 px-4 py-3 rounded-2xl text-sm outline-none font-bold"
+                    style={{background:'var(--bg)', color:'var(--text)', border:'1.5px solid var(--border)'}} />
+                  <button onClick={async()=>set('product_code', await fetchNextProductCode(editing ? product.id : null))}
+                    className="px-4 py-3 rounded-2xl text-sm font-bold flex-shrink-0"
+                    style={{background:'var(--p-light)', color:'var(--primary)', border:'1.5px solid var(--border)'}}>
+                    Tạo mã
+                  </button>
+                </div>
               </div>
 
               {/* Image */}
@@ -1047,7 +1144,32 @@
 
       async function fetchAll() {
         const { data } = await sb.from('products').select('*').order('created_at', { ascending: false });
-        if (data) setProducts(data);
+        if (data) setProducts(await ensureProductCodes(data));
+      }
+
+      async function ensureProductCodes(list) {
+        const usedCodes = new Set(list.map(getProductCode).filter(Boolean));
+        let nextCode = Math.max(0, ...Array.from(usedCodes).map(c => Number(c) || 0)) + 1;
+        let changed = false;
+        const next = list.map(p => {
+          if (getProductCode(p)) return p;
+          changed = true;
+          while (usedCodes.has(String(nextCode))) nextCode++;
+          const product_code = String(nextCode++);
+          usedCodes.add(product_code);
+          return {...p, product_code};
+        });
+        if (!changed) return next;
+
+        const updates = next
+          .filter(p => !getProductCode(list.find(x => x.id === p.id)))
+          .map(p => sb.from('products').update({product_code: p.product_code}).eq('id', p.id));
+        const results = await Promise.all(updates);
+        if (results.some(r => isMissingColumnError(r.error, 'product_code'))) {
+          warnMissingProductCodeColumn();
+          return list;
+        }
+        return next;
       }
 
       async function fetchChannels() {
