@@ -3,6 +3,7 @@ name: Apply schedule patch
 on:
   push:
     paths:
+      - 'scripts/apply_schedule_patch_20260702.py'
       - '.github/workflows/apply-schedule-patch-20260702.yml'
   workflow_dispatch:
 
