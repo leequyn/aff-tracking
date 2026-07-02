@@ -61,7 +61,13 @@
     // ── Helpers ───────────────────────────────────────────────────────────────────
     const getStatus = id => STATUSES.find(s => s.id === id) || STATUSES[0];
     const nextStatus = id => { const i = STATUSES.findIndex(s => s.id === id); return STATUSES[(i+1)%STATUSES.length].id; };
-    const TODAY = () => new Date().toISOString().slice(0,10);
+    const dateKey = (d = new Date()) => {
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${y}-${m}-${day}`;
+    };
+    const TODAY = () => dateKey();
     const fmtDate = d => { if (!d) return ''; const [y,m,dd]=d.split('-'); return `${dd}/${m}`; };
     const fmtMonth = m => { if (!m) return ''; const [y,mo]=m.split('-'); return `Tháng ${parseInt(mo)}/${y}`; };
     const fmtCurrency = n => new Intl.NumberFormat('vi-VN').format(n||0) + 'đ';
@@ -104,6 +110,10 @@
       alert('Cần thêm cột remaining_video_count trong bảng products để lưu số video còn lại. Mở Supabase SQL Editor và chạy file supabase_remaining_videos.sql trong repo.');
     }
 
+    function warnMissingSchedulesTable() {
+      alert('Cần tạo bảng product_schedules để lưu nhiều ngày đăng cho mỗi sản phẩm. Mở Supabase SQL Editor và chạy file supabase_product_schedules.sql trong repo.');
+    }
+
     async function copyText(text) {
       if (navigator.clipboard?.writeText) {
         await navigator.clipboard.writeText(text);
@@ -120,13 +130,53 @@
       document.body.removeChild(ta);
     }
 
+    function productSchedules(p) {
+      const rows = Array.isArray(p?.schedules) ? p.schedules : [];
+      if (rows.length) return rows.filter(s => s.schedule_date).sort((a,b) => a.schedule_date.localeCompare(b.schedule_date));
+      return p?.scheduled_date ? [{
+        id: 'legacy-' + p.id,
+        product_id: p.id,
+        schedule_date: p.scheduled_date,
+        note: p.note || '',
+        video_count: 1,
+        expected_remaining_count: p.remaining_video_count || 0,
+      }] : [];
+    }
+
+    function hasScheduleOn(p, date) {
+      return productSchedules(p).some(s => s.schedule_date === date);
+    }
+
+    function nextScheduleDate(p) {
+      const today = TODAY();
+      const rows = productSchedules(p);
+      return (rows.find(s => s.schedule_date >= today) || rows[0] || {}).schedule_date || '';
+    }
+
+    function scheduleSummary(p, limit = 3) {
+      const rows = productSchedules(p);
+      if (!rows.length) return [];
+      const today = TODAY();
+      const upcoming = rows.filter(s => s.schedule_date >= today);
+      return (upcoming.length ? upcoming : rows).slice(0, limit);
+    }
+
+    function allScheduleItems(products) {
+      return products.flatMap(p => productSchedules(p).map(s => ({
+        ...s,
+        product: p,
+        video_count: Number(s.video_count || 0),
+        expected_remaining_count: Number(s.expected_remaining_count || 0),
+      }))).sort((a,b) => a.schedule_date.localeCompare(b.schedule_date) || (a.product?.name||'').localeCompare(b.product?.name||''));
+    }
+
     function sortProducts(list) {
       const today = TODAY();
-      const pinned = list.filter(p => p.scheduled_date === today);
-      const future = list.filter(p => p.scheduled_date && p.scheduled_date > today)
-                        .sort((a,b) => a.scheduled_date.localeCompare(b.scheduled_date));
-      const noDate = list.filter(p => !p.scheduled_date);
-      const past   = list.filter(p => p.scheduled_date && p.scheduled_date < today);
+      const pinned = list.filter(p => hasScheduleOn(p, today));
+      const future = list.filter(p => nextScheduleDate(p) && nextScheduleDate(p) > today)
+                        .sort((a,b) => nextScheduleDate(a).localeCompare(nextScheduleDate(b)));
+      const noDate = list.filter(p => !nextScheduleDate(p));
+      const past   = list.filter(p => nextScheduleDate(p) && nextScheduleDate(p) < today);
       return [...pinned, ...future, ...noDate, ...past];
     }
 
@@ -227,12 +277,12 @@
     // ── ProductCard ───────────────────────────────────────────────────────────────
     function ProductCard({ product: p, onUpdate, onDelete, onEdit }) {
       const st = getStatus(p.status);
-      const dateRef = useRef();
       const [copied, setCopied] = useState(false);
       const productCode = getProductCode(p);
       const today = TODAY();
-      const isToday     = p.scheduled_date === today;
+      const isToday     = hasScheduleOn(p, today);
       const isPostToday = p.post_today || isToday;
+      const schedules = scheduleSummary(p);
 
       async function cycleStatus() {
         const ns = nextStatus(p.status);
@@ -255,11 +305,6 @@
         if (error && isMissingColumnError(error, 'remaining_video_count')) return warnMissingRemainingVideosColumn();
         if (error) return alert('Lỗi lưu số video còn lại: ' + error.message);
         onUpdate({...p, remaining_video_count:v});
-      }
-      async function setDate(val) {
-        const d = val || null;
-        await sb.from('products').update({scheduled_date: d}).eq('id',p.id);
-        onUpdate({...p, scheduled_date: d});
       }
       async function copyProductCode() {
         await copyText(productCode);
@@ -346,6 +391,25 @@
             </div>
           )}
 
+          {schedules.length > 0 && (
+            <div className="mx-3.5 mb-2 flex gap-1.5 overflow-x-auto no-scrollbar">
+              {schedules.map(s => (
+                <button key={s.id || s.schedule_date} onClick={onEdit}
+                  className="flex-shrink-0 px-2.5 py-1 rounded-lg text-xs font-bold"
+                  style={{background:s.schedule_date===today?'#FFF7ED':'var(--bg)', color:s.schedule_date===today?'#C2410C':'var(--muted)', border:`1px solid ${s.schedule_date===today?'#FED7AA':'var(--border)'}`}}>
+                  {fmtDate(s.schedule_date)} · {s.video_count||0} đăng
+                </button>
+              ))}
+              {productSchedules(p).length > schedules.length && (
+                <button onClick={onEdit}
+                  className="flex-shrink-0 px-2.5 py-1 rounded-lg text-xs font-bold"
+                  style={{background:'var(--bg)', color:'var(--primary)', border:'1px solid var(--border)'}}>
+                  +{productSchedules(p).length - schedules.length}
+                </button>
+              )}
+            </div>
+          )}
+
           {/* Footer bar */}
           <div className="flex items-center gap-2 px-3.5 pb-3 pt-0 flex-wrap">
             {/* Video counter */}
@@ -372,22 +436,6 @@
               <span className="text-xs ml-0.5 font-bold" style={{color:'#047857'}}>còn</span>
             </div>
 
-            {/* Scheduled date picker */}
-            <div className="relative">
-              <button onClick={()=>dateRef.current.showPicker?.() || dateRef.current.click()}
-                className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-bold"
-                style={{
-                  background: isToday ? '#FFF7ED' : 'var(--bg)',
-                  color:      isToday ? '#C2410C' : 'var(--muted)',
-                  border: `1.5px solid ${isToday ? '#FED7AA' : 'var(--border)'}`,
-                }}>
-                <span>📅</span>
-                {p.scheduled_date ? fmtDate(p.scheduled_date) : 'Ngày đăng'}
-              </button>
-              <input ref={dateRef} type="date" value={p.scheduled_date||''} onChange={e=>setDate(e.target.value)}
-                className="absolute opacity-0 w-0 h-0 top-0 left-0 pointer-events-none" tabIndex="-1" />
-            </div>
-
             {/* Post today */}
             <button onClick={togglePostToday}
               className="ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold"
@@ -407,6 +455,7 @@
     // ── ProductModal ──────────────────────────────────────────────────────────────
     function ProductModal({ product, channels, onSave, onChannelsChange, onClose }) {
       const editing = !!product?.id;
+      const initialSchedules = productSchedules(product || {});
       const [form, setForm] = useState({
         name:           product?.name||'',
         link:           product?.link||'',
@@ -417,8 +466,18 @@
         status:         product?.status||'chua_ro',
         remaining_video_count: product?.remaining_video_count||0,
         note:           product?.note||'',
-        scheduled_date: product?.scheduled_date||'',
       });
+      const [scheduleRows, setScheduleRows] = useState(
+        initialSchedules.map(s => ({
+          id: String(s.id || ''),
+          local_id: String(s.id || Math.random()),
+          schedule_date: s.schedule_date || '',
+          note: s.note || '',
+          video_count: String(s.video_count || 1),
+          expected_remaining_count: String(s.expected_remaining_count ?? product?.remaining_video_count ?? 0),
+        }))
+      );
+      const [deletedScheduleIds, setDeletedScheduleIds] = useState([]);
       const [extracting, setExtracting] = useState(false);
       const [saving,     setSaving]     = useState(false);
       const [editCh,     setEditCh]     = useState(false);
@@ -450,6 +509,52 @@
         if (form.channel === name) set('channel', newOrder[0] || '');
       }
       const set = (k,v) => setForm(f=>({...f,[k]:v}));
+      const setSchedule = (localId, key, val) =>
+        setScheduleRows(rows => rows.map(r => r.local_id === localId ? {...r, [key]:val} : r));
+      function addScheduleRow() {
+        const remain = Number(digitsOnly(form.remaining_video_count));
+        setScheduleRows(rows => [...rows, {
+          id: '',
+          local_id: 'new-' + Date.now() + '-' + Math.random(),
+          schedule_date: TODAY(),
+          note: '',
+          video_count: '1',
+          expected_remaining_count: String(Math.max(0, remain - rows.reduce((s,r)=>s+Number(digitsOnly(r.video_count)||0), 1))),
+        }]);
+      }
+      function removeScheduleRow(row) {
+        if (row.id && !row.id.startsWith('legacy-')) setDeletedScheduleIds(ids => [...ids, row.id]);
+        setScheduleRows(rows => rows.filter(r => r.local_id !== row.local_id));
+      }
+
+      async function saveSchedules(productId) {
+        const rows = scheduleRows
+          .filter(r => r.schedule_date)
+          .map(r => ({
+            id: r.id && !r.id.startsWith('legacy-') ? r.id : undefined,
+            product_id: String(productId),
+            schedule_date: r.schedule_date,
+            note: (r.note || '').trim(),
+            video_count: Number(digitsOnly(r.video_count)) || 0,
+            expected_remaining_count: Number(digitsOnly(r.expected_remaining_count)) || 0,
+          }));
+        if (deletedScheduleIds.length) {
+          const { error } = await sb.from('product_schedules').delete().in('id', deletedScheduleIds);
+          if (error && (error.code === '42P01' || (error.message || '').includes('product_schedules'))) {
+            warnMissingSchedulesTable();
+            throw error;
+          }
+          if (error) throw error;
+        }
+        if (!rows.length) return [];
+        const { data, error } = await sb.from('product_schedules').upsert(rows).select();
+        if (error && (error.code === '42P01' || (error.message || '').includes('product_schedules'))) {
+          warnMissingSchedulesTable();
+          throw error;
+        }
+        if (error) throw error;
+        return data || [];
+      }
 
       // Paste ảnh từ clipboard (Cmd+V bất kỳ đâu trong modal)
       useEffect(() => {
@@ -514,7 +619,7 @@
             status:         form.status,
             remaining_video_count: Number(digitsOnly(form.remaining_video_count)),
             note:           form.note.trim(),
-            scheduled_date: form.scheduled_date || null,
+            scheduled_date: scheduleRows.find(r => r.schedule_date)?.schedule_date || null,
           };
           // nếu là kênh mới → thêm vào channels table
           if (!channels.includes(ch)) {
@@ -532,7 +637,8 @@
               throw error;
             }
             if (error) throw error;
-            onSave(data);
+            const schedules = await saveSchedules(data.id);
+            onSave({...data, schedules});
           } else {
             const { data, error } = await sb.from('products').insert({...payload, video_count:0, post_today:false}).select().single();
             if (error && isMissingColumnError(error, 'product_code')) {
@@ -544,7 +650,8 @@
               throw error;
             }
             if (error) throw error;
-            onSave(data);
+            const schedules = await saveSchedules(data.id);
+            onSave({...data, schedules});
           }
         } catch(err) {
           alert('Lỗi lưu: ' + (err.message || JSON.stringify(err)));
@@ -759,6 +866,49 @@
                   style={{background:'#ECFDF5', color:'#065F46', border:'1.5px solid #6EE7B7'}} />
               </div>
 
+              {/* Schedule rows */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-xs font-bold tracking-wide uppercase" style={{color:'var(--muted)'}}>Lịch đăng</label>
+                  <button onClick={addScheduleRow}
+                    className="text-xs px-3 py-1.5 rounded-xl font-bold"
+                    style={{background:'var(--p-light)', color:'var(--primary)', border:'1px solid var(--border)'}}>
+                    + Thêm ngày
+                  </button>
+                </div>
+                <div className="space-y-2">
+                  {scheduleRows.length === 0 ? (
+                    <div className="rounded-2xl px-4 py-3 text-sm font-medium text-center"
+                      style={{background:'var(--bg)', color:'var(--muted)', border:'1.5px dashed var(--border)'}}>
+                      Chưa có lịch đăng
+                    </div>
+                  ) : scheduleRows.map(row => (
+                    <div key={row.local_id} className="rounded-2xl p-3 space-y-2" style={{background:'var(--bg)', border:'1.5px solid var(--border)'}}>
+                      <div className="flex gap-2 items-center">
+                        <input type="date" value={row.schedule_date} onChange={e=>setSchedule(row.local_id,'schedule_date',e.target.value)}
+                          className="flex-1 px-3 py-2 rounded-xl text-sm outline-none font-semibold"
+                          style={{background:'var(--card)', color:'var(--text)', border:'1px solid var(--border)'}} />
+                        <input value={row.video_count} onChange={e=>setSchedule(row.local_id,'video_count',digitsOnly(e.target.value))}
+                          placeholder="video" inputMode="numeric"
+                          className="w-20 px-3 py-2 rounded-xl text-sm outline-none font-bold text-center"
+                          style={{background:'var(--card)', color:'var(--primary)', border:'1px solid var(--border)'}} />
+                        <input value={row.expected_remaining_count} onChange={e=>setSchedule(row.local_id,'expected_remaining_count',digitsOnly(e.target.value))}
+                          placeholder="còn" inputMode="numeric"
+                          className="w-20 px-3 py-2 rounded-xl text-sm outline-none font-bold text-center"
+                          style={{background:'#ECFDF5', color:'#065F46', border:'1px solid #6EE7B7'}} />
+                        <button onClick={()=>removeScheduleRow(row)}
+                          className="w-8 h-8 rounded-xl flex items-center justify-center text-xs"
+                          style={{background:'#FFF0F0', color:'#EF4444'}}>🗑</button>
+                      </div>
+                      <input value={row.note} onChange={e=>setSchedule(row.local_id,'note',e.target.value)}
+                        placeholder="Note riêng cho ngày này"
+                        className="w-full px-3 py-2 rounded-xl text-sm outline-none"
+                        style={{background:'var(--card)', color:'var(--text)', border:'1px solid var(--border)'}} />
+                    </div>
+                  ))}
+                </div>
+              </div>
+
               {/* Note */}
               <div>
                 <label className="text-xs font-bold mb-1.5 block tracking-wide uppercase" style={{color:'var(--muted)'}}>Ghi chú</label>
@@ -766,22 +916,6 @@
                   placeholder="VD: hoa hồng 15%"
                   className="w-full px-4 py-3 rounded-2xl text-sm outline-none"
                   style={{background:'var(--bg)', color:'var(--text)', border:'1.5px solid var(--border)'}} />
-              </div>
-
-              {/* Scheduled date */}
-              <div>
-                <label className="text-xs font-bold mb-1.5 block tracking-wide uppercase" style={{color:'var(--muted)'}}>Ngày đăng dự kiến</label>
-                <div className="flex gap-2 items-center">
-                  <input type="date" value={form.scheduled_date} onChange={e=>set('scheduled_date',e.target.value)}
-                    className="flex-1 px-4 py-3 rounded-2xl text-sm outline-none"
-                    style={{background:'var(--bg)', color: form.scheduled_date ? 'var(--text)' : 'var(--muted)', border:'1.5px solid var(--border)'}} />
-                  {form.scheduled_date && (
-                    <button onClick={()=>set('scheduled_date','')}
-                      className="px-3 py-3 rounded-2xl text-sm font-bold"
-                      style={{background:'#FFF0F0', color:'#EF4444'}}>Xoá</button>
-                  )}
-                </div>
-                <p className="text-xs mt-1" style={{color:'var(--muted)'}}>Tới ngày đó → tự nổi lên đầu danh sách</p>
               </div>
 
               {/* Buttons */}
@@ -1155,6 +1289,113 @@
       );
     }
 
+    // ── SchedulePage ─────────────────────────────────────────────────────────────
+    function SchedulePage({ products, channels }) {
+      const today = TODAY();
+      const _tom = new Date(); _tom.setDate(_tom.getDate()+1);
+      const tomorrow = dateKey(_tom);
+      const [range, setRange] = useState('week');
+      const [filterCh, setFilterCh] = useState('all');
+
+      const endWeek = (() => { const d = new Date(); d.setDate(d.getDate()+6); return dateKey(d); })();
+      const items = allScheduleItems(products)
+        .filter(item => filterCh === 'all' || item.product?.channel === filterCh)
+        .filter(item => {
+          if (range === 'today') return item.schedule_date === today;
+          if (range === 'tomorrow') return item.schedule_date === tomorrow;
+          if (range === 'week') return item.schedule_date >= today && item.schedule_date <= endWeek;
+          return true;
+        });
+      const grouped = items.reduce((acc, item) => {
+        (acc[item.schedule_date] ||= []).push(item);
+        return acc;
+      }, {});
+      const dates = Object.keys(grouped).sort();
+      const totalVideos = items.reduce((s, item) => s + Number(item.video_count || 0), 0);
+
+      return (
+        <div className="space-y-4">
+          <div className="rounded-2xl p-4 card-shadow space-y-3" style={{background:'var(--card)'}}>
+            <div className="flex gap-2 flex-wrap">
+              {[['today','Hôm nay'],['tomorrow','Ngày mai'],['week','7 ngày'],['all','Tất cả']].map(([id,label])=>(
+                <button key={id} onClick={()=>setRange(id)}
+                  className="px-3 py-1.5 rounded-full text-xs font-bold"
+                  style={{background:range===id?'var(--primary)':'var(--bg)', color:range===id?'#fff':'var(--muted)', border:`1.5px solid ${range===id?'var(--primary)':'var(--border)'}`}}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className="flex gap-2 flex-wrap">
+              {[{id:'all',label:'Tất cả'}, ...channels.map(c=>({id:c,label:c}))].map(ch=>(
+                <button key={ch.id} onClick={()=>setFilterCh(ch.id)}
+                  className="px-3 py-1.5 rounded-full text-xs font-bold"
+                  style={{background:filterCh===ch.id?'#ECFDF5':'var(--bg)', color:filterCh===ch.id?'#065F46':'var(--muted)', border:`1.5px solid ${filterCh===ch.id?'#6EE7B7':'var(--border)'}`}}>
+                  {ch.label}
+                </button>
+              ))}
+            </div>
+            <div className="grid gap-3" style={{gridTemplateColumns:'1fr 1fr'}}>
+              <div className="rounded-2xl px-3 py-2" style={{background:'var(--bg)'}}>
+                <p className="text-xs font-semibold" style={{color:'var(--muted)'}}>Sản phẩm</p>
+                <p className="text-xl font-bold font-display" style={{color:'var(--primary)'}}>{new Set(items.map(i=>i.product_id)).size}</p>
+              </div>
+              <div className="rounded-2xl px-3 py-2" style={{background:'#ECFDF5', border:'1px solid #6EE7B7'}}>
+                <p className="text-xs font-semibold" style={{color:'#047857'}}>Video đăng</p>
+                <p className="text-xl font-bold font-display" style={{color:'#065F46'}}>{totalVideos}</p>
+              </div>
+            </div>
+          </div>
+
+          {dates.length === 0 ? (
+            <div className="text-center py-20">
+              <div className="text-6xl mb-4">✦</div>
+              <p className="font-semibold mb-1" style={{color:'var(--text)'}}>Không có lịch đăng</p>
+              <p className="text-sm" style={{color:'var(--muted)'}}>Thử đổi bộ lọc hoặc thêm lịch trong sản phẩm</p>
+            </div>
+          ) : dates.map(date => {
+            const dayItems = grouped[date];
+            const dayVideos = dayItems.reduce((s,item)=>s+Number(item.video_count||0),0);
+            return (
+              <div key={date} className="rounded-2xl overflow-hidden card-shadow" style={{background:'var(--card)'}}>
+                <div className="flex items-center justify-between px-4 py-3" style={{background:date===today?'#FFF7ED':'var(--bg)', borderBottom:'1px solid var(--border)'}}>
+                  <div>
+                    <h3 className="font-bold text-sm" style={{color:date===today?'#C2410C':'var(--text)'}}>
+                      {date===today?'Hôm nay':date===tomorrow?'Ngày mai':fmtDate(date)}
+                    </h3>
+                    <p className="text-xs" style={{color:'var(--muted)'}}>{dayItems.length} sản phẩm · {dayVideos} video</p>
+                  </div>
+                  <span className="text-xs font-bold px-2.5 py-1 rounded-full" style={{background:'#ECFDF5', color:'#065F46', border:'1px solid #6EE7B7'}}>
+                    {dayVideos} đăng
+                  </span>
+                </div>
+                {dayItems.map(item => (
+                  <div key={item.id} className="px-4 py-3" style={{borderBottom:'1px solid var(--border)'}}>
+                    <div className="flex gap-3">
+                      <div className="w-12 h-12 rounded-xl overflow-hidden flex items-center justify-center flex-shrink-0" style={{background:'var(--p-light)'}}>
+                        {item.product?.image_data ? <img src={item.product.image_data} alt="" className="w-full h-full object-cover" /> : <span>🛍</span>}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5 flex-wrap mb-1">
+                          {getProductCode(item.product) && <span className="text-xs px-2 py-0.5 rounded-full font-bold" style={{background:'#ECFDF5', color:'#065F46'}}>#{getProductCode(item.product)}</span>}
+                          <span className="text-xs px-2 py-0.5 rounded-full font-bold" style={{background:'var(--p-light)', color:'var(--primary)'}}>{item.product?.channel}</span>
+                        </div>
+                        <p className="text-sm font-bold line-clamp-2" style={{color:'var(--text)'}}>{item.product?.name || 'Chưa có tên'}</p>
+                        {item.note && <p className="text-sm mt-1 font-medium" style={{color:'#9D174D'}}>{item.note}</p>}
+                        <div className="flex gap-2 mt-2 flex-wrap">
+                          <span className="text-xs px-2.5 py-1 rounded-lg font-bold" style={{background:'var(--bg)', color:'var(--primary)'}}>{item.video_count||0} video đăng</span>
+                          <span className="text-xs px-2.5 py-1 rounded-lg font-bold" style={{background:'#ECFDF5', color:'#065F46', border:'1px solid #6EE7B7'}}>còn {item.expected_remaining_count||0}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+
     // ── Root ──────────────────────────────────────────────────────────────────────
     function Root() {
       const [session,       setSession]       = useState(null);
@@ -1165,7 +1406,7 @@
       const [activeStatus,  setActiveStatus]  = useState('all');
       const [showModal,     setShowModal]     = useState(false);
       const [editProduct,   setEditProduct]   = useState(null);
-      const [activePage,    setActivePage]    = useState('products'); // 'products' | 'expenses'
+      const [activePage,    setActivePage]    = useState('products'); // 'products' | 'schedule' | 'expenses'
 
       useEffect(() => {
         sb.auth.getSession().then(({ data: { session } }) => {
@@ -1181,13 +1422,30 @@
         fetchChannels();
         const ch = sb.channel('products-rt')
           .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, fetchAll)
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'product_schedules' }, fetchAll)
           .subscribe();
         return () => sb.removeChannel(ch);
       }, [session]);
 
       async function fetchAll() {
         const { data } = await sb.from('products').select('*').order('created_at', { ascending: false });
-        if (data) setProducts(await ensureProductCodes(data));
+        if (!data) return;
+        let productsWithCodes = await ensureProductCodes(data);
+        const { data: scheduleData, error: scheduleError } = await sb.from('product_schedules').select('*').order('schedule_date', { ascending: true });
+        if (scheduleError && (scheduleError.code === '42P01' || (scheduleError.message || '').includes('product_schedules'))) {
+          setProducts(productsWithCodes.map(p => ({...p, schedules: productSchedules(p)})));
+          return;
+        }
+        if (scheduleError) {
+          console.warn(scheduleError);
+          setProducts(productsWithCodes);
+          return;
+        }
+        const byProduct = (scheduleData || []).reduce((acc, row) => {
+          (acc[row.product_id] ||= []).push(row);
+          return acc;
+        }, {});
+        setProducts(productsWithCodes.map(p => ({...p, schedules: byProduct[p.id] || []})));
       }
 
       async function ensureProductCodes(list) {
@@ -1245,19 +1503,19 @@
         : [...new Set(products.map(p => p.channel))].filter(Boolean).sort();
       const today    = TODAY();
       const _tom = new Date(); _tom.setDate(_tom.getDate()+1);
-      const TOMORROW = _tom.toISOString().slice(0,10);
+      const TOMORROW = dateKey(_tom);
       const filtered = sortProducts(
         products
           .filter(p => activeChannel === 'all' || p.channel === activeChannel)
           .filter(p => {
-            if (activeStatus === 'post_today') return p.post_today || p.scheduled_date === today;
-            if (activeStatus === 'tomorrow')   return p.scheduled_date === TOMORROW;
+            if (activeStatus === 'post_today') return p.post_today || hasScheduleOn(p, today);
+            if (activeStatus === 'tomorrow')   return hasScheduleOn(p, TOMORROW);
             if (activeStatus === 'remaining_videos') return (p.remaining_video_count || 0) > 0;
             if (activeStatus === 'all')        return true;
             return p.status === activeStatus;
           })
       );
-      const postTodayCount = products.filter(p => p.post_today || p.scheduled_date === today).length;
+      const postTodayCount = products.filter(p => p.post_today || hasScheduleOn(p, today)).length;
       // alias for readability in JSX
       const chList = displayChannels;
 
@@ -1275,8 +1533,8 @@
       const chFiltered = products.filter(p => activeChannel === 'all' || p.channel === activeChannel);
       const statusCount = {
         all:        chFiltered.length,
-        post_today: chFiltered.filter(p => p.post_today || p.scheduled_date === today).length,
-        tomorrow:   chFiltered.filter(p => p.scheduled_date === TOMORROW).length,
+        post_today: chFiltered.filter(p => p.post_today || hasScheduleOn(p, today)).length,
+        tomorrow:   chFiltered.filter(p => hasScheduleOn(p, TOMORROW)).length,
         remaining_videos: chFiltered.filter(p => (p.remaining_video_count || 0) > 0).length,
         ...Object.fromEntries(STATUSES.map(s => [s.id, chFiltered.filter(p => p.status === s.id).length])),
       };
@@ -1332,7 +1590,7 @@
 
             {/* Page tabs */}
             <div className="flex gap-2 mb-3">
-              {[['products','🛍 Sản phẩm'],['expenses','💰 Chi phí']].map(([page,label])=>(
+              {[['products','🛍 Sản phẩm'],['schedule','📅 Lịch đăng'],['expenses','💰 Chi phí']].map(([page,label])=>(
                 <button key={page} onClick={()=>setActivePage(page)}
                   className="px-4 py-2 rounded-full text-sm font-bold"
                   style={{
@@ -1396,6 +1654,8 @@
           <div className="px-4 space-y-3">
             {activePage === 'expenses' ? (
               <ExpensePage channels={chList} />
+            ) : activePage === 'schedule' ? (
+              <SchedulePage products={products} channels={chList} />
             ) : filtered.length === 0 ? (
               <div className="text-center py-20">
                 <div className="text-6xl mb-4">✦</div>
