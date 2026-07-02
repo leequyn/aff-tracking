@@ -1,0 +1,20 @@
+name: Apply schedule patch
+
+on:
+  push:
+    paths:
+      - '.github/workflows/apply-schedule-patch-20260702.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Apply schedule patch
+        run: python scripts/apply_schedule_patch_20260702.py
