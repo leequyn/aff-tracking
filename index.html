@@ -404,7 +404,7 @@
                 <button key={s.id || s.schedule_date} onClick={onEdit}
                   className="flex-shrink-0 px-2.5 py-1 rounded-lg text-xs font-bold text-left"
                   style={{background:s.schedule_date===today?'#FFF7ED':'var(--bg)', color:s.schedule_date===today?'#C2410C':'var(--muted)', border:`1px solid ${s.schedule_date===today?'#FED7AA':'var(--border)'}`}}>
-                  <span className="block">{fmtDate(s.schedule_date)} · {s.video_count||0} đăng · còn {s.expected_remaining_count||0}</span>
+                  <span className="block">{fmtDate(s.schedule_date)} · {s.video_count||0} đăng</span>
                   {s.note && <span className="block mt-0.5 text-[11px] font-medium truncate max-w-[11rem]" style={{color:'#9D174D'}}>{s.note}</span>}
                 </button>
               ))}
