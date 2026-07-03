@@ -1259,6 +1259,7 @@
       const _tom = new Date(); _tom.setDate(_tom.getDate()+1);
       const tomorrow = dateKey(_tom);
       const [range, setRange] = useState('week');
+      const [selectedDate, setSelectedDate] = useState('');
       const [filterCh, setFilterCh] = useState('all');
 
       const weekStart = (() => { const d = new Date(); d.setDate(d.getDate()+2); return dateKey(d); })();
@@ -1269,6 +1270,7 @@
           if (range === 'today') return item.schedule_date === today;
           if (range === 'tomorrow') return item.schedule_date === tomorrow;
           if (range === 'week') return item.schedule_date >= weekStart && item.schedule_date <= weekEnd;
+          if (range === 'date') return item.schedule_date === selectedDate;
           return true;
         });
       const grouped = items.reduce((acc, item) => {
@@ -1289,6 +1291,10 @@
                   {label}
                 </button>
               ))}
+              <input type="date" value={selectedDate}
+                onChange={e=>{ setSelectedDate(e.target.value); setRange(e.target.value ? 'date' : 'week'); }}
+                className="px-3 py-1.5 rounded-full text-xs font-bold outline-none"
+                style={{background:range==='date'?'var(--primary)':'var(--bg)', color:range==='date'?'#fff':'var(--muted)', border:`1.5px solid ${range==='date'?'var(--primary)':'var(--border)'}`}} />
             </div>
             <div className="flex gap-2 flex-wrap">
               {[{id:'all',label:'Tất cả'}, ...channels.map(c=>({id:c,label:c}))].map(ch=>(
