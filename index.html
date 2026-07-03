@@ -1481,12 +1481,19 @@
       const today    = TODAY();
       const _tom = new Date(); _tom.setDate(_tom.getDate()+1);
       const TOMORROW = dateKey(_tom);
+      const scheduleOffsets = [2, 3, 4].map(n => {
+        const d = new Date();
+        d.setDate(d.getDate() + n);
+        return { id: `plus_${n}`, label: `T+${n}`, date: dateKey(d) };
+      });
       const filtered = sortProducts(
         products
           .filter(p => activeChannel === 'all' || p.channel === activeChannel)
           .filter(p => {
             if (activeStatus === 'post_today') return p.post_today || hasScheduleOn(p, today);
             if (activeStatus === 'tomorrow')   return hasScheduleOn(p, TOMORROW);
+            const offsetFilter = scheduleOffsets.find(f => f.id === activeStatus);
+            if (offsetFilter) return hasScheduleOn(p, offsetFilter.date);
             if (activeStatus === 'all')        return true;
             return p.status === activeStatus;
           })
@@ -1511,6 +1518,7 @@
         all:        chFiltered.length,
         post_today: chFiltered.reduce((sum, p) => sum + scheduledVideosOn(p, today), 0),
         tomorrow:   chFiltered.reduce((sum, p) => sum + scheduledVideosOn(p, TOMORROW), 0),
+        ...Object.fromEntries(scheduleOffsets.map(f => [f.id, chFiltered.reduce((sum, p) => sum + scheduledVideosOn(p, f.date), 0)])),
         ...Object.fromEntries(STATUSES.map(s => [s.id, chFiltered.filter(p => p.status === s.id).length])),
       };
 
@@ -1518,6 +1526,7 @@
         { id:'all',        label:'Tất cả' },
         { id:'post_today', label:'📌 Hôm nay' },
         { id:'tomorrow',   label:'📅 Ngày mai' },
+        ...scheduleOffsets.map(f => ({id:f.id, label:f.label})),
         ...STATUSES.map(s=>({id:s.id, label:s.label, dot:s.dot, bg:s.bg, fg:s.fg, ring:s.ring})),
       ];
 
