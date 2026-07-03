@@ -157,8 +157,7 @@
       const rows = productSchedules(p);
       if (!rows.length) return [];
       const today = TODAY();
-      const upcoming = rows.filter(s => s.schedule_date >= today);
-      return (upcoming.length ? upcoming : rows).slice(0, limit);
+      return rows.filter(s => s.schedule_date >= today).slice(0, limit);
     }
 
     function allScheduleItems(products) {
@@ -294,18 +293,6 @@
         await sb.from('products').update({post_today:v}).eq('id',p.id);
         onUpdate({...p, post_today:v});
       }
-      async function changeVideoCount(delta) {
-        const v = Math.max(0,(p.video_count||0)+delta);
-        await sb.from('products').update({video_count:v}).eq('id',p.id);
-        onUpdate({...p, video_count:v});
-      }
-      async function changeRemainingVideoCount(delta) {
-        const v = Math.max(0,(p.remaining_video_count||0)+delta);
-        const { error } = await sb.from('products').update({remaining_video_count:v}).eq('id',p.id);
-        if (error && isMissingColumnError(error, 'remaining_video_count')) return warnMissingRemainingVideosColumn();
-        if (error) return alert('Lỗi lưu số video còn lại: ' + error.message);
-        onUpdate({...p, remaining_video_count:v});
-      }
       async function copyProductCode() {
         await copyText(productCode);
         setCopied(true);
@@ -397,14 +384,14 @@
                 <button key={s.id || s.schedule_date} onClick={onEdit}
                   className="flex-shrink-0 px-2.5 py-1 rounded-lg text-xs font-bold"
                   style={{background:s.schedule_date===today?'#FFF7ED':'var(--bg)', color:s.schedule_date===today?'#C2410C':'var(--muted)', border:`1px solid ${s.schedule_date===today?'#FED7AA':'var(--border)'}`}}>
-                  {fmtDate(s.schedule_date)} · {s.video_count||0} đăng
+                  {fmtDate(s.schedule_date)} · {s.video_count||0} đăng · còn {s.expected_remaining_count||0}
                 </button>
               ))}
-              {productSchedules(p).length > schedules.length && (
+              {productSchedules(p).filter(s => s.schedule_date >= today).length > schedules.length && (
                 <button onClick={onEdit}
                   className="flex-shrink-0 px-2.5 py-1 rounded-lg text-xs font-bold"
                   style={{background:'var(--bg)', color:'var(--primary)', border:'1px solid var(--border)'}}>
-                  +{productSchedules(p).length - schedules.length}
+                  +{productSchedules(p).filter(s => s.schedule_date >= today).length - schedules.length}
                 </button>
               )}
             </div>
@@ -412,30 +399,6 @@
 
           {/* Footer bar */}
           <div className="flex items-center gap-2 px-3.5 pb-3 pt-0 flex-wrap">
-            {/* Video counter */}
-            <div className="flex items-center gap-1.5 rounded-xl px-2 py-1.5" style={{background:'var(--bg)'}}>
-              <button onClick={()=>changeVideoCount(-1)}
-                className="w-5 h-5 rounded-md flex items-center justify-center font-bold text-xs"
-                style={{background:'var(--card)', color:'var(--muted)', boxShadow:'0 1px 3px rgba(0,0,0,0.1)'}}>−</button>
-              <span className="text-sm font-bold min-w-[1.2rem] text-center" style={{color:'var(--text)'}}>{p.video_count||0}</span>
-              <button onClick={()=>changeVideoCount(1)}
-                className="w-5 h-5 rounded-md flex items-center justify-center font-bold text-xs"
-                style={{background:'var(--card)', color:'var(--primary)', boxShadow:'0 1px 3px rgba(0,0,0,0.1)'}}>+</button>
-              <span className="text-xs ml-0.5 font-medium" style={{color:'var(--muted)'}}>đăng</span>
-            </div>
-
-            {/* Remaining video counter */}
-            <div className="flex items-center gap-1.5 rounded-xl px-2 py-1.5" style={{background:'#ECFDF5', border:'1.5px solid #6EE7B7'}}>
-              <button onClick={()=>changeRemainingVideoCount(-1)}
-                className="w-5 h-5 rounded-md flex items-center justify-center font-bold text-xs"
-                style={{background:'var(--card)', color:'#047857', boxShadow:'0 1px 3px rgba(0,0,0,0.1)'}}>−</button>
-              <span className="text-sm font-bold min-w-[1.2rem] text-center" style={{color:'#065F46'}}>{p.remaining_video_count||0}</span>
-              <button onClick={()=>changeRemainingVideoCount(1)}
-                className="w-5 h-5 rounded-md flex items-center justify-center font-bold text-xs"
-                style={{background:'var(--card)', color:'#047857', boxShadow:'0 1px 3px rgba(0,0,0,0.1)'}}>+</button>
-              <span className="text-xs ml-0.5 font-bold" style={{color:'#047857'}}>còn</span>
-            </div>
-
             {/* Post today */}
             <button onClick={togglePostToday}
               className="ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold"
@@ -1300,13 +1263,14 @@
       const [range, setRange] = useState('week');
       const [filterCh, setFilterCh] = useState('all');
 
-      const endWeek = (() => { const d = new Date(); d.setDate(d.getDate()+6); return dateKey(d); })();
+      const weekStart = (() => { const d = new Date(); d.setDate(d.getDate()+2); return dateKey(d); })();
+      const weekEnd = (() => { const d = new Date(); d.setDate(d.getDate()+8); return dateKey(d); })();
       const items = allScheduleItems(products)
         .filter(item => filterCh === 'all' || item.product?.channel === filterCh)
         .filter(item => {
           if (range === 'today') return item.schedule_date === today;
           if (range === 'tomorrow') return item.schedule_date === tomorrow;
-          if (range === 'week') return item.schedule_date >= today && item.schedule_date <= endWeek;
+          if (range === 'week') return item.schedule_date >= weekStart && item.schedule_date <= weekEnd;
           return true;
         });
       const grouped = items.reduce((acc, item) => {
