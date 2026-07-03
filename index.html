@@ -152,11 +152,14 @@
       return (rows.find(s => s.schedule_date >= today) || rows[0] || {}).schedule_date || '';
     }
 
-    function scheduleSummary(p, limit = 3) {
+    function scheduleSummary(p) {
       const rows = productSchedules(p);
       if (!rows.length) return [];
       const today = TODAY();
-      return rows.filter(s => s.schedule_date >= today).slice(0, limit);
+      const weekEndDate = new Date();
+      weekEndDate.setDate(weekEndDate.getDate() + 6);
+      const weekEnd = dateKey(weekEndDate);
+      return rows.filter(s => s.schedule_date >= today && s.schedule_date <= weekEnd);
     }
 
     function postedVideosFromSchedule(p) {
@@ -399,13 +402,6 @@
                   {s.note && <span className="block mt-0.5 text-[11px] font-medium truncate max-w-[11rem]" style={{color:'#9D174D'}}>{s.note}</span>}
                 </button>
               ))}
-              {productSchedules(p).filter(s => s.schedule_date >= today).length > schedules.length && (
-                <button onClick={onEdit}
-                  className="flex-shrink-0 px-2.5 py-1 rounded-lg text-xs font-bold"
-                  style={{background:'var(--bg)', color:'var(--primary)', border:'1px solid var(--border)'}}>
-                  +{productSchedules(p).filter(s => s.schedule_date >= today).length - schedules.length}
-                </button>
-              )}
             </div>
           )}
 
