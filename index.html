@@ -169,6 +169,12 @@
         .reduce((sum, s) => sum + Number(s.video_count || 0), 0);
     }
 
+    function scheduledVideosOn(p, date) {
+      return productSchedules(p)
+        .filter(s => s.schedule_date === date)
+        .reduce((sum, s) => sum + Number(s.video_count || 0), 0);
+    }
+
     function allScheduleItems(products) {
       return products.flatMap(p => productSchedules(p).map(s => ({
         ...s,
@@ -1503,8 +1509,8 @@
       const chFiltered = products.filter(p => activeChannel === 'all' || p.channel === activeChannel);
       const statusCount = {
         all:        chFiltered.length,
-        post_today: chFiltered.filter(p => p.post_today || hasScheduleOn(p, today)).length,
-        tomorrow:   chFiltered.filter(p => hasScheduleOn(p, TOMORROW)).length,
+        post_today: chFiltered.reduce((sum, p) => sum + scheduledVideosOn(p, today), 0),
+        tomorrow:   chFiltered.reduce((sum, p) => sum + scheduledVideosOn(p, TOMORROW), 0),
         ...Object.fromEntries(STATUSES.map(s => [s.id, chFiltered.filter(p => p.status === s.id).length])),
       };
 
