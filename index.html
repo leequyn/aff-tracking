@@ -52,7 +52,6 @@
     // ── Constants ─────────────────────────────────────────────────────────────────
     const STATUSES = [
       { id: 'chua_ro',    label: 'Chưa rõ',    bg: '#EDE9FF', fg: '#5B21B6', dot: '#7C3AED', ring: '#C4B8F5' },
-      { id: 'tiem_nang',  label: 'Tiềm năng',  bg: '#FFF7ED', fg: '#C2410C', dot: '#F97316', ring: '#FED7AA' },
       { id: 'da_ra_don',  label: 'Đã ra đơn',  bg: '#ECFDF5', fg: '#065F46', dot: '#10B981', ring: '#6EE7B7' },
       { id: 'ra_don_tot', label: 'Ra đơn tốt', bg: '#FDF2F8', fg: '#9D174D', dot: '#EC4899', ring: '#F9A8D4' },
       { id: 'fail',       label: 'Fail',       bg: '#FEF2F2', fg: '#991B1B', dot: '#EF4444', ring: '#FCA5A5' },
@@ -158,6 +157,13 @@
       if (!rows.length) return [];
       const today = TODAY();
       return rows.filter(s => s.schedule_date >= today).slice(0, limit);
+    }
+
+    function postedVideosFromSchedule(p) {
+      const today = TODAY();
+      return productSchedules(p)
+        .filter(s => s.schedule_date <= today)
+        .reduce((sum, s) => sum + Number(s.video_count || 0), 0);
     }
 
     function allScheduleItems(products) {
@@ -282,6 +288,7 @@
       const isToday     = hasScheduleOn(p, today);
       const isPostToday = p.post_today || isToday;
       const schedules = scheduleSummary(p);
+      const postedScheduleVideos = postedVideosFromSchedule(p);
 
       async function cycleStatus() {
         const ns = nextStatus(p.status);
@@ -364,6 +371,10 @@
                   <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{background:st.dot}} />
                   {st.label}
                 </button>
+                <span className="text-xs px-2.5 py-0.5 rounded-full font-bold"
+                  style={{background:'#E0F2FE', color:'#0369A1', border:'1px solid #7DD3FC'}}>
+                  {postedScheduleVideos} đăng
+                </span>
               </div>
             </div>
           </div>
@@ -382,9 +393,10 @@
             <div className="mx-3.5 mb-2 flex gap-1.5 overflow-x-auto no-scrollbar">
               {schedules.map(s => (
                 <button key={s.id || s.schedule_date} onClick={onEdit}
-                  className="flex-shrink-0 px-2.5 py-1 rounded-lg text-xs font-bold"
+                  className="flex-shrink-0 px-2.5 py-1 rounded-lg text-xs font-bold text-left"
                   style={{background:s.schedule_date===today?'#FFF7ED':'var(--bg)', color:s.schedule_date===today?'#C2410C':'var(--muted)', border:`1px solid ${s.schedule_date===today?'#FED7AA':'var(--border)'}`}}>
-                  {fmtDate(s.schedule_date)} · {s.video_count||0} đăng · còn {s.expected_remaining_count||0}
+                  <span className="block">{fmtDate(s.schedule_date)} · {s.video_count||0} đăng · còn {s.expected_remaining_count||0}</span>
+                  {s.note && <span className="block mt-0.5 text-[11px] font-medium truncate max-w-[11rem]" style={{color:'#9D174D'}}>{s.note}</span>}
                 </button>
               ))}
               {productSchedules(p).filter(s => s.schedule_date >= today).length > schedules.length && (
@@ -820,16 +832,6 @@
                     </button>
                   ))}
                 </div>
-              </div>
-
-              {/* Remaining videos */}
-              <div>
-                <label className="text-xs font-bold mb-1.5 block tracking-wide uppercase" style={{color:'var(--muted)'}}>Video còn lại chưa đăng</label>
-                <input value={form.remaining_video_count} onChange={e=>set('remaining_video_count',digitsOnly(e.target.value))}
-                  placeholder="VD: 3"
-                  inputMode="numeric"
-                  className="w-full px-4 py-3 rounded-2xl text-sm outline-none font-bold"
-                  style={{background:'#ECFDF5', color:'#065F46', border:'1.5px solid #6EE7B7'}} />
               </div>
 
               {/* Schedule rows */}
@@ -1477,7 +1479,6 @@
           .filter(p => {
             if (activeStatus === 'post_today') return p.post_today || hasScheduleOn(p, today);
             if (activeStatus === 'tomorrow')   return hasScheduleOn(p, TOMORROW);
-            if (activeStatus === 'remaining_videos') return (p.remaining_video_count || 0) > 0;
             if (activeStatus === 'all')        return true;
             return p.status === activeStatus;
           })
@@ -1502,7 +1503,6 @@
         all:        chFiltered.length,
         post_today: chFiltered.filter(p => p.post_today || hasScheduleOn(p, today)).length,
         tomorrow:   chFiltered.filter(p => hasScheduleOn(p, TOMORROW)).length,
-        remaining_videos: chFiltered.filter(p => (p.remaining_video_count || 0) > 0).length,
         ...Object.fromEntries(STATUSES.map(s => [s.id, chFiltered.filter(p => p.status === s.id).length])),
       };
 
@@ -1510,7 +1510,6 @@
         { id:'all',        label:'Tất cả' },
         { id:'post_today', label:'📌 Hôm nay' },
         { id:'tomorrow',   label:'📅 Ngày mai' },
-        { id:'remaining_videos', label:'Còn video', dot:'#10B981', bg:'#ECFDF5', fg:'#065F46', ring:'#6EE7B7' },
         ...STATUSES.map(s=>({id:s.id, label:s.label, dot:s.dot, bg:s.bg, fg:s.fg, ring:s.ring})),
       ];
 
