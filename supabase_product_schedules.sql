@@ -5,8 +5,12 @@ create table if not exists public.product_schedules (
   note text not null default '',
   video_count integer not null default 1,
   expected_remaining_count integer not null default 0,
+  is_posted boolean not null default false,
   created_at timestamptz not null default now()
 );
+
+alter table public.product_schedules
+add column if not exists is_posted boolean not null default false;
 
 create index if not exists product_schedules_product_id_idx
 on public.product_schedules(product_id);

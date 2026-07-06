@@ -139,6 +139,7 @@
         note: p.note || '',
         video_count: 1,
         expected_remaining_count: p.remaining_video_count || 0,
+        is_posted: false,
       }] : [];
     }
 
@@ -163,9 +164,8 @@
     }
 
     function postedVideosFromSchedule(p) {
-      const today = TODAY();
       return productSchedules(p)
-        .filter(s => s.schedule_date <= today)
+        .filter(s => !!s.is_posted)
         .reduce((sum, s) => sum + Number(s.video_count || 0), 0);
     }
 
@@ -181,6 +181,7 @@
         product: p,
         video_count: Number(s.video_count || 0),
         expected_remaining_count: Number(s.expected_remaining_count || 0),
+        is_posted: !!s.is_posted,
       }))).sort((a,b) => a.schedule_date.localeCompare(b.schedule_date) || (a.product?.name||'').localeCompare(b.product?.name||''));
     }
 
@@ -381,6 +382,10 @@
                   {st.label}
                 </button>
                 <span className="text-xs px-2.5 py-0.5 rounded-full font-bold"
+                  style={{background:'#ECFDF5', color:'#065F46', border:'1px solid #6EE7B7'}}>
+                  còn {p.remaining_video_count||0}
+                </span>
+                <span className="text-xs px-2.5 py-0.5 rounded-full font-bold"
                   style={{background:'#E0F2FE', color:'#0369A1', border:'1px solid #7DD3FC'}}>
                   {postedScheduleVideos} đăng
                 </span>
@@ -452,6 +457,7 @@
           note: s.note || '',
           video_count: String(s.video_count || 1),
           expected_remaining_count: String(s.expected_remaining_count ?? product?.remaining_video_count ?? 0),
+          is_posted: !!s.is_posted,
         }))
       );
       const [deletedScheduleIds, setDeletedScheduleIds] = useState([]);
@@ -497,6 +503,7 @@
           note: '',
           video_count: '1',
           expected_remaining_count: String(Math.max(0, remain - rows.reduce((s,r)=>s+Number(digitsOnly(r.video_count)||0), 1))),
+          is_posted: false,
         }]);
       }
       function removeScheduleRow(row) {
@@ -514,6 +521,7 @@
               note: (r.note || '').trim(),
               video_count: Number(digitsOnly(r.video_count)) || 0,
               expected_remaining_count: Number(digitsOnly(r.expected_remaining_count)) || 0,
+              is_posted: !!r.is_posted,
             };
             if (r.id && !r.id.startsWith('legacy-')) row.id = r.id;
             return row;
@@ -862,6 +870,13 @@
                           placeholder="video" inputMode="numeric"
                           className="w-20 px-3 py-2 rounded-xl text-sm outline-none font-bold text-center"
                           style={{background:'var(--card)', color:'var(--primary)', border:'1px solid var(--border)'}} />
+                        <label className="w-10 h-10 rounded-xl flex items-center justify-center"
+                          title="Đã đăng"
+                          style={{background:row.is_posted?'#E0F2FE':'var(--card)', border:`1px solid ${row.is_posted?'#7DD3FC':'var(--border)'}`}}>
+                          <input type="checkbox" checked={!!row.is_posted}
+                            onChange={e=>setSchedule(row.local_id,'is_posted',e.target.checked)}
+                            className="w-4 h-4 accent-sky-600" />
+                        </label>
                         <input value={row.expected_remaining_count} onChange={e=>setSchedule(row.local_id,'expected_remaining_count',digitsOnly(e.target.value))}
                           placeholder="còn" inputMode="numeric"
                           className="w-20 px-3 py-2 rounded-xl text-sm outline-none font-bold text-center"
