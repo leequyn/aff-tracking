@@ -163,12 +163,6 @@
       return rows.filter(s => s.schedule_date >= today && s.schedule_date <= weekEnd);
     }
 
-    function postedVideosFromSchedule(p) {
-      return productSchedules(p)
-        .filter(s => !!s.is_posted)
-        .reduce((sum, s) => sum + Number(s.video_count || 0), 0);
-    }
-
     function scheduledVideosOn(p, date) {
       return productSchedules(p)
         .filter(s => s.schedule_date === date)
@@ -290,7 +284,7 @@
     }
 
     // ── ProductCard ───────────────────────────────────────────────────────────────
-    function ProductCard({ product: p, onUpdate, onDelete, onEdit }) {
+    function ProductCard({ product: p, scheduleFilterDate, onUpdate, onDelete, onEdit }) {
       const st = getStatus(p.status);
       const [copied, setCopied] = useState(false);
       const productCode = getProductCode(p);
@@ -298,7 +292,10 @@
       const isToday     = hasScheduleOn(p, today);
       const isPostToday = p.post_today || isToday;
       const schedules = scheduleSummary(p);
-      const postedScheduleVideos = postedVideosFromSchedule(p);
+      const displayScheduleDate = scheduleFilterDate || today;
+      const displayScheduleRows = productSchedules(p).filter(s => s.schedule_date === displayScheduleDate);
+      const displayScheduleVideos = scheduledVideosOn(p, displayScheduleDate);
+      const displaySchedulePosted = displayScheduleRows.length > 0 && displayScheduleRows.every(s => !!s.is_posted);
 
       async function cycleStatus() {
         const ns = nextStatus(p.status);
@@ -309,6 +306,31 @@
         const v = !p.post_today;
         await sb.from('products').update({post_today:v}).eq('id',p.id);
         onUpdate({...p, post_today:v});
+      }
+      async function changeRemainingVideoCount(delta) {
+        const v = Math.max(0,(p.remaining_video_count||0)+delta);
+        const { error } = await sb.from('products').update({remaining_video_count:v}).eq('id',p.id);
+        if (error && isMissingColumnError(error, 'remaining_video_count')) return warnMissingRemainingVideosColumn();
+        if (error) return alert('Lỗi lưu số video còn lại: ' + error.message);
+        onUpdate({...p, remaining_video_count:v});
+      }
+      async function setRemainingVideoCount(val) {
+        const v = Math.max(0, Number(digitsOnly(val)) || 0);
+        const { error } = await sb.from('products').update({remaining_video_count:v}).eq('id',p.id);
+        if (error && isMissingColumnError(error, 'remaining_video_count')) return warnMissingRemainingVideosColumn();
+        if (error) return alert('Lỗi lưu số video còn lại: ' + error.message);
+        onUpdate({...p, remaining_video_count:v});
+      }
+      async function toggleSchedulePosted() {
+        const rows = displayScheduleRows.filter(s => s.id && !String(s.id).startsWith('legacy-'));
+        if (!rows.length) return onEdit();
+        const next = !displaySchedulePosted;
+        const { error } = await sb.from('product_schedules').update({is_posted:next}).in('id', rows.map(s => s.id));
+        if (error) return alert('Lỗi lưu trạng thái đã đăng: ' + error.message);
+        onUpdate({
+          ...p,
+          schedules: productSchedules(p).map(s => rows.some(r => r.id === s.id) ? {...s, is_posted:next} : s),
+        });
       }
       async function copyProductCode() {
         await copyText(productCode);
@@ -381,14 +403,30 @@
                   <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{background:st.dot}} />
                   {st.label}
                 </button>
-                <span className="text-xs px-2.5 py-0.5 rounded-full font-bold"
+                <div className="flex items-center gap-1 rounded-full px-1.5 py-0.5"
                   style={{background:'#ECFDF5', color:'#065F46', border:'1px solid #6EE7B7'}}>
-                  còn {p.remaining_video_count||0}
-                </span>
-                <span className="text-xs px-2.5 py-0.5 rounded-full font-bold"
-                  style={{background:'#E0F2FE', color:'#0369A1', border:'1px solid #7DD3FC'}}>
-                  {postedScheduleVideos} đăng
-                </span>
+                  <button onClick={()=>changeRemainingVideoCount(-1)}
+                    className="w-5 h-5 rounded-full text-xs font-bold"
+                    style={{background:'#D1FAE5', color:'#047857'}}>−</button>
+                  <span className="text-xs font-bold">còn</span>
+                  <input value={p.remaining_video_count||0}
+                    onChange={e=>setRemainingVideoCount(e.target.value)}
+                    inputMode="numeric"
+                    className="w-8 text-xs font-bold text-center outline-none"
+                    style={{background:'transparent', color:'#065F46'}} />
+                  <button onClick={()=>changeRemainingVideoCount(1)}
+                    className="w-5 h-5 rounded-full text-xs font-bold"
+                    style={{background:'#D1FAE5', color:'#047857'}}>+</button>
+                </div>
+                <label className="flex items-center gap-1.5 rounded-full px-2.5 py-0.5"
+                  title="Tích khi đã đăng theo ngày đang lọc"
+                  style={{background:displaySchedulePosted?'#DBEAFE':'#E0F2FE', color:'#0369A1', border:'1px solid #7DD3FC'}}>
+                  <input type="checkbox" checked={displaySchedulePosted}
+                    disabled={displayScheduleRows.length === 0}
+                    onChange={toggleSchedulePosted}
+                    className="w-3.5 h-3.5 accent-sky-600" />
+                  <span className="text-xs font-bold">{displayScheduleVideos} đăng</span>
+                </label>
               </div>
             </div>
           </div>
@@ -1544,6 +1582,10 @@
         ...scheduleOffsets.map(f => ({id:f.id, label:f.label})),
         ...STATUSES.map(s=>({id:s.id, label:s.label, dot:s.dot, bg:s.bg, fg:s.fg, ring:s.ring})),
       ];
+      const activeScheduleDate =
+        activeStatus === 'tomorrow' ? TOMORROW :
+        activeStatus === 'post_today' ? today :
+        (scheduleOffsets.find(f => f.id === activeStatus)?.date || today);
 
       return (
         <div className="min-h-screen pb-8" style={{background:'var(--bg)'}}>
@@ -1662,6 +1704,7 @@
               </div>
             ) : filtered.map(p=>(
               <ProductCard key={p.id} product={p}
+                scheduleFilterDate={activeScheduleDate}
                 onUpdate={handleUpdate}
                 onDelete={handleDelete}
                 onEdit={()=>{ setEditProduct(p); setShowModal(true); }} />
