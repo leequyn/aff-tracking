@@ -434,15 +434,19 @@
                     className="w-5 h-5 rounded-full text-xs font-bold"
                     style={{background:'#D1FAE5', color:'#047857'}}>+</button>
                 </div>
-                <label className="flex items-center gap-1.5 rounded-full px-2.5 py-0.5"
-                  title="Tích khi đã đăng theo ngày đang lọc"
+                <div className="flex items-center gap-1.5 rounded-full px-2.5 py-0.5"
+                  title="Bấm số đăng để sửa lịch, tích ô để đánh dấu đã đăng"
                   style={{background:displaySchedulePosted?'#DBEAFE':'#E0F2FE', color:'#0369A1', border:'1px solid #7DD3FC'}}>
                   <input type="checkbox" checked={displaySchedulePosted}
                     disabled={displayScheduleRows.length === 0}
                     onChange={toggleSchedulePosted}
                     className="w-3.5 h-3.5 accent-sky-600" />
-                  <span className="text-xs font-bold">{displayScheduleVideos} đăng</span>
-                </label>
+                  <button type="button" onClick={onEdit}
+                    className="text-xs font-bold"
+                    style={{background:'transparent', color:'inherit', border:0, padding:0}}>
+                    {displayScheduleVideos} đăng
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -1360,7 +1364,7 @@
     }
 
     // ── SchedulePage ─────────────────────────────────────────────────────────────
-    function SchedulePage({ products, channels }) {
+    function SchedulePage({ products, channels, onEditProduct }) {
       const today = TODAY();
       const _tom = new Date(); _tom.setDate(_tom.getDate()+1);
       const tomorrow = dateKey(_tom);
@@ -1446,7 +1450,10 @@
                   </span>
                 </div>
                 {dayItems.map(item => (
-                  <div key={item.id} className="px-4 py-3" style={{borderBottom:'1px solid var(--border)'}}>
+                  <div key={item.id} onClick={()=>onEditProduct(item.product)}
+                    className="px-4 py-3 cursor-pointer"
+                    title="Bấm để sửa thông tin sản phẩm"
+                    style={{borderBottom:'1px solid var(--border)'}}>
                     <div className="flex gap-3">
                       <div className="w-12 h-12 rounded-xl overflow-hidden flex items-center justify-center flex-shrink-0" style={{background:'var(--p-light)'}}>
                         {item.product?.image_data ? <img src={item.product.image_data} alt="" className="w-full h-full object-cover" /> : <span>🛍</span>}
@@ -1773,7 +1780,8 @@
             {activePage === 'expenses' ? (
               <ExpensePage channels={chList} />
             ) : activePage === 'schedule' ? (
-              <SchedulePage products={products} channels={chList} />
+              <SchedulePage products={products} channels={chList}
+                onEditProduct={product=>{ setEditProduct(product); setShowModal(true); }} />
             ) : filtered.length === 0 ? (
               <div className="text-center py-20">
                 <div className="text-6xl mb-4">✦</div>
