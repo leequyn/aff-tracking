@@ -296,7 +296,8 @@
       const [copied, setCopied] = useState(false);
       const [copiedCaption, setCopiedCaption] = useState(false);
       const productCode = getProductCode(p);
-      const captionText = String(p.caption || p.note || '').trim();
+      const captionText = String(p.caption || '').trim();
+      const noteText = String(p.note || '').trim();
       const today = TODAY();
       const isToday     = hasScheduleOn(p, today);
       const isPostToday = p.post_today || isToday;
@@ -451,10 +452,19 @@
             <div className="mx-3.5 mb-2">
               <button onClick={copyCaption} title="Bấm để copy cap"
                 className="text-sm font-medium px-2.5 py-1 rounded-lg text-left"
-                style={{background:'#FDF2F8', border:'1px solid #F9A8D4', color:'#9D174D'}}>
+                style={{background:'#ECFDF5', border:'1px solid #6EE7B7', color:'#065F46'}}>
                 {captionText}
                 {copiedCaption && <span className="ml-1 text-xs" style={{opacity:.75}}>Đã copy</span>}
               </button>
+            </div>
+          )}
+
+          {noteText && (
+            <div className="mx-3.5 mb-2">
+              <span className="text-sm font-medium px-2.5 py-1 rounded-lg"
+                style={{background:'#FDF2F8', border:'1px solid #F9A8D4', color:'#9D174D'}}>
+                {noteText}
+              </span>
             </div>
           )}
 
