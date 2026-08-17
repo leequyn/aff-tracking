@@ -1125,7 +1125,14 @@
         let eq = sb.from('expenses').select('*').gte('date',fromM+'-01').lte('date',`${toM}-${lastD}`).order('date',{ascending:false});
         if (filterCh !== 'all') eq = eq.eq('channel', filterCh);
         const {data:eData} = await eq;
-        if (eData) setExpenses(eData);
+        if (eData) {
+          setExpenses(
+            eData.slice().sort((a, b) =>
+              String(b.date || '').localeCompare(String(a.date || '')) ||
+              String(b.created_at || '').localeCompare(String(a.created_at || '')),
+            ),
+          );
+        }
 
         let rq = sb.from('revenues').select('*').in('month', months);
         if (filterCh !== 'all') rq = rq.eq('channel', filterCh);
@@ -1267,8 +1274,8 @@
               ? <p className="text-sm text-center py-5" style={{color:'var(--muted)'}}>Chưa có khoản chi nào</p>
               : expenses.map(e=>(
                 <div key={e.id} className="flex items-center gap-2 px-4 py-2.5" style={{borderBottom:'1px solid var(--border)'}}>
-                  <div className="flex-shrink-0 text-xs font-bold" style={{color:'var(--muted)', minWidth:'3.5rem'}}>
-                    {allMonths.length>1 ? e.date.slice(0,7).split('-').reverse().join('/') : fmtDate(e.date)}
+                  <div className="flex-shrink-0 text-xs font-bold" style={{color:'var(--muted)', minWidth:'5rem'}}>
+                    {fmtDate(e.date)}
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold truncate" style={{color:'var(--text)'}}>{e.tool_name}</p>
