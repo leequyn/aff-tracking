@@ -1010,9 +1010,14 @@
     }
 
     // ── ExpenseModal ─────────────────────────────────────────────────────────────
-    function ExpenseModal({ selMonth, channels, onSave, onClose }) {
+    function ExpenseModal({ expense, selMonth, channels, onSave, onClose }) {
+      const editing = !!expense?.id;
       const [form, setForm] = useState({
-        date: TODAY(), tool_name: '', amount: '', channel: '', note: ''
+        date: expense?.date || TODAY(),
+        tool_name: expense?.tool_name || '',
+        amount: expense?.amount ? String(expense.amount) : '',
+        channel: expense?.channel || '',
+        note: expense?.note || '',
       });
       const [saving, setSaving] = useState(false);
       const set = (k,v) => setForm(f=>({...f,[k]:v}));
@@ -1028,7 +1033,10 @@
           channel: form.channel,
           note: form.note.trim(),
         };
-        const { data, error } = await sb.from('expenses').insert(payload).select().single();
+        const query = editing
+          ? sb.from('expenses').update(payload).eq('id', expense.id)
+          : sb.from('expenses').insert(payload);
+        const { data, error } = await query.select().single();
         if (error) { alert('Lỗi: ' + error.message); setSaving(false); return; }
         onSave(data);
       }
@@ -1040,7 +1048,7 @@
           <div className="w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl p-6"
             style={{background:'var(--card)', border:'1px solid var(--border)'}}>
             <div className="flex items-center justify-between mb-5">
-              <h2 className="font-display text-xl font-bold" style={{color:'var(--text)'}}>+ Chi phí tool</h2>
+              <h2 className="font-display text-xl font-bold" style={{color:'var(--text)'}}>{editing ? 'Sửa chi phí tool' : '+ Chi phí tool'}</h2>
               <button onClick={onClose} className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold"
                 style={{background:'var(--bg)', color:'var(--muted)'}}>✕</button>
             </div>
@@ -1089,7 +1097,7 @@
                   style={{background:'var(--bg)', color:'var(--muted)', border:'1.5px solid var(--border)'}}>Huỷ</button>
                 <button onClick={save} disabled={saving} className="flex-1 py-3 rounded-2xl font-bold text-sm text-white"
                   style={{background: saving ? '#A78BFA' : 'var(--primary)'}}>
-                  {saving ? 'Đang lưu...' : 'Thêm +'}
+                  {saving ? 'Đang lưu...' : (editing ? 'Cập nhật ✓' : 'Thêm +')}
                 </button>
               </div>
             </div>
@@ -1115,6 +1123,7 @@
       const [revForms,     setRevForms]     = useState({});
       const [savingRev,    setSavingRev]    = useState({});
       const [showExpModal, setShowExpModal] = useState(false);
+      const [editExpense,   setEditExpense]   = useState(null);
 
       useEffect(() => { fetchAll(); }, [fromM, toM, filterCh]);
 
@@ -1149,6 +1158,22 @@
         if (!confirm('Xoá khoản chi này?')) return;
         await sb.from('expenses').delete().eq('id',id);
         setExpenses(prev=>prev.filter(e=>e.id!==id));
+      }
+
+      function openAddExpense() {
+        setEditExpense(null);
+        setShowExpModal(true);
+      }
+
+      function openEditExpense(expense) {
+        setEditExpense(expense);
+        setShowExpModal(true);
+      }
+
+      function handleExpenseSaved() {
+        setShowExpModal(false);
+        setEditExpense(null);
+        fetchAll();
       }
 
       async function saveRevenue(month, channel) {
@@ -1266,7 +1291,7 @@
           <div className="rounded-2xl overflow-hidden card-shadow" style={{background:'var(--card)'}}>
             <div className="flex items-center justify-between px-4 py-3" style={{borderBottom:'1px solid var(--border)'}}>
               <h3 className="font-bold text-sm" style={{color:'var(--text)'}}>Chi phí tools</h3>
-              <button onClick={()=>setShowExpModal(true)}
+              <button onClick={openAddExpense}
                 className="text-xs px-3 py-1.5 rounded-xl font-bold text-white"
                 style={{background:'var(--primary)'}}>+ Thêm</button>
             </div>
@@ -1282,6 +1307,10 @@
                     {(e.channel||e.note) && <p className="text-xs truncate" style={{color:'var(--muted)'}}>{[e.channel,e.note].filter(Boolean).join(' · ')}</p>}
                   </div>
                   <span className="text-sm font-bold flex-shrink-0" style={{color:'var(--primary)'}}>{fmtCurrency(e.amount)}</span>
+                  <button onClick={()=>openEditExpense(e)}
+                    className="w-7 h-7 rounded-lg flex items-center justify-center text-xs flex-shrink-0"
+                    title="Sửa chi phí"
+                    style={{background:'var(--p-light)', color:'var(--primary)'}}>✏️</button>
                   <button onClick={()=>deleteExp(e.id)}
                     className="w-7 h-7 rounded-lg flex items-center justify-center text-xs flex-shrink-0"
                     style={{background:'#FFF0F0', color:'#EF4444'}}>🗑</button>
@@ -1362,9 +1391,9 @@
           </div>
 
           {showExpModal && (
-            <ExpenseModal selMonth={toM} channels={channels}
-              onSave={d=>{setExpenses(p=>[d,...p]); setShowExpModal(false);}}
-              onClose={()=>setShowExpModal(false)} />
+            <ExpenseModal expense={editExpense} selMonth={toM} channels={channels}
+              onSave={handleExpenseSaved}
+              onClose={()=>{ setShowExpModal(false); setEditExpense(null); }} />
           )}
         </div>
       );
