@@ -1525,6 +1525,7 @@
       const [activeChannel, setActiveChannel] = useState('all');
       const [activeStatus,  setActiveStatus]  = useState('all');
       const [scheduleFilterDate, setScheduleFilterDate] = useState('');
+      const [postedVideoLimit, setPostedVideoLimit] = useState('');
       const [showModal,     setShowModal]     = useState(false);
       const [editProduct,   setEditProduct]   = useState(null);
       const [activePage,    setActivePage]    = useState('products'); // 'products' | 'schedule' | 'expenses'
@@ -1630,10 +1631,19 @@
         d.setDate(d.getDate() + n);
         return { id: `plus_${n}`, label: `T+${n}`, date: dateKey(d) };
       });
+      const activeScheduleDate =
+        scheduleFilterDate ? scheduleFilterDate :
+        activeStatus === 'tomorrow' ? TOMORROW :
+        activeStatus === 'post_today' ? today :
+        (scheduleOffsets.find(f => f.id === activeStatus)?.date || today);
+      const postedVideoLimitValue = Number(digitsOnly(postedVideoLimit));
+      const isProductScheduledForActiveDate = p =>
+        hasScheduleOn(p, activeScheduleDate) || (activeScheduleDate === today && p.post_today);
       const filtered = sortProducts(
         products
           .filter(p => activeChannel === 'all' || p.channel === activeChannel)
           .filter(p => !scheduleFilterDate || hasScheduleOn(p, scheduleFilterDate))
+          .filter(p => !postedVideoLimit || (isProductScheduledForActiveDate(p) && scheduledVideosOn(p, activeScheduleDate) < postedVideoLimitValue))
           .filter(p => {
             if (activeStatus === 'post_today') return p.post_today || hasScheduleOn(p, today);
             if (activeStatus === 'tomorrow')   return hasScheduleOn(p, TOMORROW);
@@ -1674,11 +1684,6 @@
         ...scheduleOffsets.map(f => ({id:f.id, label:f.label})),
         ...STATUSES.map(s=>({id:s.id, label:s.label, dot:s.dot, bg:s.bg, fg:s.fg, ring:s.ring})),
       ];
-      const activeScheduleDate =
-        scheduleFilterDate ? scheduleFilterDate :
-        activeStatus === 'tomorrow' ? TOMORROW :
-        activeStatus === 'post_today' ? today :
-        (scheduleOffsets.find(f => f.id === activeStatus)?.date || today);
 
       return (
         <div className="min-h-screen pb-8" style={{background:'var(--bg)'}}>
@@ -1804,6 +1809,28 @@
                       className="flex-shrink-0 px-3 py-2 rounded-xl text-xs font-bold"
                       style={{background:'var(--card)', color:'var(--muted)', border:'1.5px solid var(--border)'}}>
                       Xóa lọc
+                    </button>
+                  </>
+                )}
+                <label className="flex-shrink-0 text-xs font-bold uppercase tracking-wide" style={{color:'var(--muted)'}}>
+                  Dưới
+                </label>
+                <input value={postedVideoLimit}
+                  onChange={e=>setPostedVideoLimit(digitsOnly(e.target.value))}
+                  placeholder="X vid"
+                  inputMode="numeric"
+                  className="flex-shrink-0 w-20 px-3 py-2 rounded-xl text-xs font-bold outline-none"
+                  style={{background:'var(--card)', color:'var(--text)', border:'1.5px solid var(--border)'}} />
+                {postedVideoLimit && (
+                  <>
+                    <span className="flex-shrink-0 px-3 py-2 rounded-xl text-xs font-bold"
+                      style={{background:'#ECFDF5', color:'#065F46', border:'1.5px solid #6EE7B7'}}>
+                      {filtered.length} SP dưới {postedVideoLimitValue} vid
+                    </span>
+                    <button onClick={()=>setPostedVideoLimit('')}
+                      className="flex-shrink-0 px-3 py-2 rounded-xl text-xs font-bold"
+                      style={{background:'var(--card)', color:'var(--muted)', border:'1.5px solid var(--border)'}}>
+                      Xóa vid
                     </button>
                   </>
                 )}
