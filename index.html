@@ -176,6 +176,12 @@
         .reduce((sum, s) => sum + Number(s.video_count || 0), 0);
     }
 
+    function postedVideosThroughDate(p, date) {
+      return productSchedules(p)
+        .filter(s => s.schedule_date <= date && !!s.is_posted)
+        .reduce((sum, s) => sum + Number(s.video_count || 0), 0);
+    }
+
     function allScheduleItems(products) {
       return products.flatMap(p => productSchedules(p).map(s => ({
         ...s,
@@ -1639,11 +1645,15 @@
       const postedVideoLimitValue = Number(digitsOnly(postedVideoLimit));
       const isProductScheduledForActiveDate = p =>
         hasScheduleOn(p, activeScheduleDate) || (activeScheduleDate === today && p.post_today);
+      const videosForPostedLimit = p =>
+        scheduleFilterDate ? scheduledVideosOn(p, scheduleFilterDate) : postedVideosThroughDate(p, today);
+      const isProductInPostedLimitScope = p =>
+        scheduleFilterDate ? isProductScheduledForActiveDate(p) : postedVideosThroughDate(p, today) > 0;
       const filtered = sortProducts(
         products
           .filter(p => activeChannel === 'all' || p.channel === activeChannel)
           .filter(p => !scheduleFilterDate || hasScheduleOn(p, scheduleFilterDate))
-          .filter(p => !postedVideoLimit || (isProductScheduledForActiveDate(p) && scheduledVideosOn(p, activeScheduleDate) < postedVideoLimitValue))
+          .filter(p => !postedVideoLimit || (isProductInPostedLimitScope(p) && videosForPostedLimit(p) < postedVideoLimitValue))
           .filter(p => {
             if (activeStatus === 'post_today') return p.post_today || hasScheduleOn(p, today);
             if (activeStatus === 'tomorrow')   return hasScheduleOn(p, TOMORROW);
