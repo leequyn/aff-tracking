@@ -15,3 +15,5 @@ on public.withdrawals(date);
 
 create index if not exists withdrawals_channel_idx
 on public.withdrawals(channel);
+
+notify pgrst, 'reload schema';

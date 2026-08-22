@@ -120,8 +120,9 @@
       alert('Cần tạo bảng product_schedules để lưu nhiều ngày đăng cho mỗi sản phẩm. Mở Supabase SQL Editor và chạy file supabase_product_schedules.sql trong repo.');
     }
 
-    function warnMissingWithdrawalsTable() {
-      alert('Cần tạo bảng withdrawals để lưu lịch sử rút tiền. Mở Supabase SQL Editor và chạy file supabase_withdrawals.sql trong repo.');
+    function warnWithdrawalsAccess(error) {
+      const detail = error?.message || error?.details || error?.code || '';
+      alert('App chưa truy cập được bảng withdrawals. Nếu bạn vừa chạy SQL, chạy lại file supabase_withdrawals.sql bản mới để reload schema, rồi refresh trang.\n\nLỗi Supabase: ' + detail);
     }
 
     async function copyText(text) {
@@ -1143,7 +1144,7 @@
           : sb.from('withdrawals').insert(payload);
         const { data, error } = await query.select().single();
         if (error && (error.code === '42P01' || (error.message || '').includes('withdrawals'))) {
-          warnMissingWithdrawalsTable();
+          warnWithdrawalsAccess(error);
           setSaving(false);
           return;
         }
@@ -1320,7 +1321,7 @@
       async function deleteWithdrawal(id) {
         if (!confirm('Xoá lịch sử rút tiền này?')) return;
         const { error } = await sb.from('withdrawals').delete().eq('id', id);
-        if (error && (error.code === '42P01' || (error.message || '').includes('withdrawals'))) return warnMissingWithdrawalsTable();
+        if (error && (error.code === '42P01' || (error.message || '').includes('withdrawals'))) return warnWithdrawalsAccess(error);
         if (error) return alert('Lỗi xoá: ' + error.message);
         setWithdrawals(prev=>prev.filter(w=>w.id!==id));
       }
