@@ -122,7 +122,7 @@
 
     function warnWithdrawalsAccess(error) {
       const detail = error?.message || error?.details || error?.code || '';
-      alert('App chưa truy cập được bảng withdrawals. Nếu bạn vừa chạy SQL, chạy lại file supabase_withdrawals.sql bản mới để reload schema, rồi refresh trang.\n\nLỗi Supabase: ' + detail);
+      alert('App chưa truy cập được bảng withdrawals. Chạy lại file supabase_withdrawals.sql bản mới để thêm policy RLS/reload schema, rồi refresh trang.\n\nLỗi Supabase: ' + detail);
     }
 
     async function copyText(text) {
