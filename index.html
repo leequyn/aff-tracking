@@ -120,6 +120,10 @@
       alert('Cần tạo bảng product_schedules để lưu nhiều ngày đăng cho mỗi sản phẩm. Mở Supabase SQL Editor và chạy file supabase_product_schedules.sql trong repo.');
     }
 
+    function warnMissingWithdrawalsTable() {
+      alert('Cần tạo bảng withdrawals để lưu lịch sử rút tiền. Mở Supabase SQL Editor và chạy file supabase_withdrawals.sql trong repo.');
+    }
+
     async function copyText(text) {
       if (navigator.clipboard?.writeText) {
         await navigator.clipboard.writeText(text);
@@ -1111,6 +1115,101 @@
       );
     }
 
+    // ── WithdrawalModal ──────────────────────────────────────────────────────────
+    function WithdrawalModal({ withdrawal, channels, onSave, onClose }) {
+      const editing = !!withdrawal?.id;
+      const [form, setForm] = useState({
+        date: withdrawal?.date || TODAY(),
+        channel: withdrawal?.channel || (channels[0] || ''),
+        amount: withdrawal?.amount ? String(withdrawal.amount) : '',
+        note: withdrawal?.note || '',
+      });
+      const [saving, setSaving] = useState(false);
+      const set = (k,v) => setForm(f=>({...f,[k]:v}));
+
+      async function save() {
+        if (!form.date) return alert('Chọn ngày rút tiền');
+        if (!form.channel) return alert('Chọn kênh');
+        if (!form.amount || isNaN(Number(String(form.amount).replace(/[^0-9]/g,'')))) return alert('Nhập số tiền hợp lệ');
+        setSaving(true);
+        const payload = {
+          date: form.date,
+          channel: form.channel,
+          amount: Number(String(form.amount).replace(/[^0-9]/g,'')),
+          note: form.note.trim(),
+        };
+        const query = editing
+          ? sb.from('withdrawals').update(payload).eq('id', withdrawal.id)
+          : sb.from('withdrawals').insert(payload);
+        const { data, error } = await query.select().single();
+        if (error && (error.code === '42P01' || (error.message || '').includes('withdrawals'))) {
+          warnMissingWithdrawalsTable();
+          setSaving(false);
+          return;
+        }
+        if (error) { alert('Lỗi: ' + error.message); setSaving(false); return; }
+        onSave(data);
+      }
+
+      return (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center"
+          style={{background:'rgba(30,16,64,0.6)', backdropFilter:'blur(4px)'}}
+          onClick={e=>e.target===e.currentTarget&&onClose()}>
+          <div className="w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl p-6"
+            style={{background:'var(--card)', border:'1px solid var(--border)'}}>
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="font-display text-xl font-bold" style={{color:'var(--text)'}}>{editing ? 'Sửa rút tiền' : '+ Rút tiền'}</h2>
+              <button onClick={onClose} className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold"
+                style={{background:'var(--bg)', color:'var(--muted)'}}>✕</button>
+            </div>
+            <div className="space-y-3">
+              <div className="flex gap-2">
+                <div className="flex-1">
+                  <label className="text-xs font-bold mb-1 block uppercase tracking-wide" style={{color:'var(--muted)'}}>Ngày rút</label>
+                  <input type="date" value={form.date} onChange={e=>set('date',e.target.value)}
+                    className="w-full px-3 py-2.5 rounded-xl text-sm outline-none"
+                    style={{background:'var(--bg)', color:'var(--text)', border:'1.5px solid var(--border)'}} />
+                </div>
+                <div className="flex-1">
+                  <label className="text-xs font-bold mb-1 block uppercase tracking-wide" style={{color:'var(--muted)'}}>Kênh *</label>
+                  <select value={form.channel} onChange={e=>set('channel',e.target.value)}
+                    className="w-full px-3 py-2.5 rounded-xl text-sm outline-none"
+                    style={{background:'var(--bg)', color:'var(--text)', border:'1.5px solid var(--border)'}}>
+                    <option value="">Chọn kênh</option>
+                    {channels.map(c=><option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-bold mb-1 block uppercase tracking-wide" style={{color:'var(--muted)'}}>Số tiền rút *</label>
+                <input value={form.amount ? new Intl.NumberFormat('vi-VN').format(Number(String(form.amount).replace(/[^0-9]/g,'')) || 0) : ''}
+                  onChange={e=>set('amount',e.target.value.replace(/\D/g,''))}
+                  placeholder="VD: 583000"
+                  inputMode="numeric"
+                  className="w-full px-3 py-2.5 rounded-xl text-sm outline-none"
+                  style={{background:'var(--bg)', color:'var(--text)', border:'1.5px solid var(--border)'}} />
+              </div>
+              <div>
+                <label className="text-xs font-bold mb-1 block uppercase tracking-wide" style={{color:'var(--muted)'}}>Note</label>
+                <input value={form.note} onChange={e=>set('note',e.target.value)}
+                  placeholder="VD: TikTok payout, đợt 1..."
+                  className="w-full px-3 py-2.5 rounded-xl text-sm outline-none"
+                  style={{background:'var(--bg)', color:'var(--text)', border:'1.5px solid var(--border)'}} />
+              </div>
+              <div className="flex gap-2 pt-1">
+                <button onClick={onClose} className="flex-1 py-3 rounded-2xl font-bold text-sm"
+                  style={{background:'var(--bg)', color:'var(--muted)', border:'1.5px solid var(--border)'}}>Huỷ</button>
+                <button onClick={save} disabled={saving} className="flex-1 py-3 rounded-2xl font-bold text-sm text-white"
+                  style={{background: saving ? '#A78BFA' : 'var(--primary)'}}>
+                  {saving ? 'Đang lưu...' : (editing ? 'Cập nhật ✓' : 'Thêm +')}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     // ── ExpensePage ───────────────────────────────────────────────────────────────
     function monthsInRange(from, to) {
       const ms = [], d = new Date(from+'-01'), end = new Date(to+'-01');
@@ -1125,10 +1224,13 @@
       const [filterCh,     setFilterCh]     = useState('all');
       const [expenses,     setExpenses]     = useState([]);
       const [revenues,     setRevenues]     = useState([]);
+      const [withdrawals,  setWithdrawals]  = useState([]);
       const [revForms,     setRevForms]     = useState({});
       const [savingRev,    setSavingRev]    = useState({});
       const [showExpModal, setShowExpModal] = useState(false);
       const [editExpense,   setEditExpense]   = useState(null);
+      const [showWithdrawalModal, setShowWithdrawalModal] = useState(false);
+      const [editWithdrawal, setEditWithdrawal] = useState(null);
 
       useEffect(() => { fetchAll(); }, [fromM, toM, filterCh]);
 
@@ -1157,6 +1259,24 @@
           rData.forEach(r => { f[r.month+'|'+r.channel]={revenue:r.revenue,commission:r.commission,actual_received:r.actual_received,note:r.note||''}; });
           setRevForms(f);
         }
+
+        let wq = sb.from('withdrawals').select('*').gte('date',fromM+'-01').lte('date',`${toM}-${lastD}`).order('date',{ascending:false});
+        if (filterCh !== 'all') wq = wq.eq('channel', filterCh);
+        const {data:wData, error:wError} = await wq;
+        if (wError && (wError.code === '42P01' || (wError.message || '').includes('withdrawals'))) {
+          console.warn('withdrawals table missing', wError);
+          setWithdrawals([]);
+        } else if (wError) {
+          console.warn(wError);
+          setWithdrawals([]);
+        } else if (wData) {
+          setWithdrawals(
+            wData.slice().sort((a, b) =>
+              String(b.date || '').localeCompare(String(a.date || '')) ||
+              String(b.created_at || '').localeCompare(String(a.created_at || '')),
+            ),
+          );
+        }
       }
 
       async function deleteExp(id) {
@@ -1181,11 +1301,41 @@
         fetchAll();
       }
 
+      function openAddWithdrawal() {
+        setEditWithdrawal(null);
+        setShowWithdrawalModal(true);
+      }
+
+      function openEditWithdrawal(withdrawal) {
+        setEditWithdrawal(withdrawal);
+        setShowWithdrawalModal(true);
+      }
+
+      function handleWithdrawalSaved() {
+        setShowWithdrawalModal(false);
+        setEditWithdrawal(null);
+        fetchAll();
+      }
+
+      async function deleteWithdrawal(id) {
+        if (!confirm('Xoá lịch sử rút tiền này?')) return;
+        const { error } = await sb.from('withdrawals').delete().eq('id', id);
+        if (error && (error.code === '42P01' || (error.message || '').includes('withdrawals'))) return warnMissingWithdrawalsTable();
+        if (error) return alert('Lỗi xoá: ' + error.message);
+        setWithdrawals(prev=>prev.filter(w=>w.id!==id));
+      }
+
+      function actualReceivedFor(month, channel) {
+        return withdrawals
+          .filter(w => w.date?.startsWith(month) && (channel === 'Tổng' || w.channel === channel))
+          .reduce((s,w)=>s+Number(w.amount||0),0);
+      }
+
       async function saveRevenue(month, channel) {
         const key = month+'|'+channel;
         const f = revForms[key]||{};
         setSavingRev(s=>({...s,[key]:true}));
-        const payload = {month, channel, revenue:Number(f.revenue||0), commission:Number(f.commission||0), actual_received:Number(f.actual_received||0), note:f.note||''};
+        const payload = {month, channel, revenue:Number(f.revenue||0), commission:Number(f.commission||0), actual_received:actualReceivedFor(month, channel), note:f.note||''};
         const {data,error} = await sb.from('revenues').upsert(payload,{onConflict:'month,channel'}).select().single();
         if (!error&&data) setRevenues(prev=>{ const ex=prev.find(r=>r.month===month&&r.channel===channel); return ex?prev.map(r=>r.month===month&&r.channel===channel?data:r):[...prev,data]; });
         setSavingRev(s=>({...s,[key]:false}));
@@ -1199,7 +1349,7 @@
       const allMonths   = monthsInRange(fromM, toM);
       const monthStats  = allMonths.map(m => {
         const mExp = expenses.filter(e=>e.date.startsWith(m)).reduce((s,e)=>s+(e.amount||0),0);
-        const mRev = revenues.filter(r=>r.month===m).reduce((s,r)=>s+(r.actual_received||0),0);
+        const mRev = withdrawals.filter(w=>w.date.startsWith(m)).reduce((s,w)=>s+(w.amount||0),0);
         return {m, exp:mExp, rev:mRev, profit:mRev-mExp};
       });
       const totExp    = monthStats.reduce((s,x)=>s+x.exp,0);
@@ -1333,7 +1483,7 @@
           <div className="rounded-2xl overflow-hidden card-shadow" style={{background:'var(--card)'}}>
             <div className="px-4 py-3" style={{borderBottom:'1px solid var(--border)'}}>
               <h3 className="font-bold text-sm" style={{color:'var(--text)'}}>Doanh thu</h3>
-              <p className="text-xs mt-0.5" style={{color:'var(--muted)'}}>Nhập xong bấm Lưu từng kênh</p>
+              <p className="text-xs mt-0.5" style={{color:'var(--muted)'}}>Doanh thu/Hoa hồng nhập tay, Thực nhận lấy từ lịch sử rút tiền</p>
             </div>
             {allMonths.map(m=>(
               <div key={m}>
@@ -1347,12 +1497,13 @@
                   const key=m+'|'+ch, f=revForms[key]||{}, isSaving=!!savingRev[key];
                   // Tổng row: auto-sum all real channels for this month
                   const tongVals = isTong
-                    ? ['revenue','commission','actual_received'].reduce((acc,fk)=>{
+                    ? ['revenue','commission'].reduce((acc,fk)=>{
                         acc[fk] = channels.reduce((s,c)=>s+Number((revForms[m+'|'+c]||{})[fk]||0),0);
                         return acc;
                       },{})
                     : null;
                   const vals = isTong ? tongVals : f;
+                  const actualReceived = actualReceivedFor(m, ch);
                   return (
                     <div key={ch} className="px-4 py-3" style={{borderBottom:'1px solid var(--border)', background:isTong?'var(--bg)':''}}>
                       <div className="flex items-center justify-between mb-2">
@@ -1369,7 +1520,7 @@
                         )}
                       </div>
                       <div className="grid gap-2" style={{gridTemplateColumns:'1fr 1fr 1fr'}}>
-                        {[['revenue','Doanh thu'],['commission','Hoa hồng'],['actual_received','Thực nhận']].map(([fk,label])=>(
+                        {[['revenue','Doanh thu'],['commission','Hoa hồng']].map(([fk,label])=>(
                           <div key={fk}>
                             <p className="text-xs mb-1" style={{color:'var(--muted)'}}>{label}</p>
                             {isTong ? (
@@ -1387,6 +1538,13 @@
                             )}
                           </div>
                         ))}
+                        <div>
+                          <p className="text-xs mb-1" style={{color:'var(--muted)'}}>Thực nhận</p>
+                          <div className="w-full px-2.5 py-2 rounded-xl text-sm font-bold"
+                            style={{background:'#ECFDF5', color:'#065F46', border:'1.5px solid #6EE7B7'}}>
+                            {new Intl.NumberFormat('vi-VN').format(actualReceived || 0)}
+                          </div>
+                        </div>
                       </div>
                     </div>
                   );
@@ -1395,10 +1553,55 @@
             ))}
           </div>
 
+          {/* Withdrawal history */}
+          <div className="rounded-2xl overflow-hidden card-shadow" style={{background:'var(--card)'}}>
+            <div className="flex items-center justify-between px-4 py-3" style={{borderBottom:'1px solid var(--border)'}}>
+              <div>
+                <h3 className="font-bold text-sm" style={{color:'var(--text)'}}>Lịch sử rút tiền</h3>
+                <p className="text-xs mt-0.5" style={{color:'var(--muted)'}}>Thực nhận được cộng từ các lần rút tiền ở đây</p>
+              </div>
+              <button onClick={openAddWithdrawal}
+                className="text-xs px-3 py-1.5 rounded-xl font-bold text-white"
+                style={{background:'var(--primary)'}}>+ Rút tiền</button>
+            </div>
+            {withdrawals.length === 0
+              ? <p className="text-sm text-center py-5" style={{color:'var(--muted)'}}>Chưa có lịch sử rút tiền</p>
+              : withdrawals.map(w=>(
+                <div key={w.id} className="flex items-center gap-2 px-4 py-2.5" style={{borderBottom:'1px solid var(--border)'}}>
+                  <div className="flex-shrink-0 text-xs font-bold" style={{color:'var(--muted)', minWidth:'5rem'}}>
+                    {fmtDate(w.date)}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold truncate" style={{color:'var(--text)'}}>{w.channel || 'Chưa chọn kênh'}</p>
+                    {w.note && <p className="text-xs truncate" style={{color:'var(--muted)'}}>{w.note}</p>}
+                  </div>
+                  <span className="text-sm font-bold flex-shrink-0" style={{color:'#065F46'}}>{fmtCurrency(w.amount)}</span>
+                  <button onClick={()=>openEditWithdrawal(w)}
+                    className="w-7 h-7 rounded-lg flex items-center justify-center text-xs flex-shrink-0"
+                    title="Sửa rút tiền"
+                    style={{background:'var(--p-light)', color:'var(--primary)'}}>✏️</button>
+                  <button onClick={()=>deleteWithdrawal(w.id)}
+                    className="w-7 h-7 rounded-lg flex items-center justify-center text-xs flex-shrink-0"
+                    style={{background:'#FFF0F0', color:'#EF4444'}}>🗑</button>
+                </div>
+              ))
+            }
+            {withdrawals.length > 0 && (
+              <div className="flex justify-end px-4 py-2" style={{background:'var(--bg)'}}>
+                <span className="text-sm font-bold" style={{color:'#065F46'}}>Tổng rút: {fmtCurrency(totRev)}</span>
+              </div>
+            )}
+          </div>
+
           {showExpModal && (
             <ExpenseModal expense={editExpense} selMonth={toM} channels={channels}
               onSave={handleExpenseSaved}
               onClose={()=>{ setShowExpModal(false); setEditExpense(null); }} />
+          )}
+          {showWithdrawalModal && (
+            <WithdrawalModal withdrawal={editWithdrawal} channels={channels}
+              onSave={handleWithdrawalSaved}
+              onClose={()=>{ setShowWithdrawalModal(false); setEditWithdrawal(null); }} />
           )}
         </div>
       );
